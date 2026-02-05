@@ -1,0 +1,11 @@
+{
+  "lm_studio": {
+    "api_token": "your-lm-studio-api-token-here",
+    "host": "localhost",
+    "port": 1234
+  },
+  "mcp_integrations": ["mcp/memory", "mcp/sequential-thinking"],
+  "dreaming": {
+    "memory_threshold": 30
+  }
+}
