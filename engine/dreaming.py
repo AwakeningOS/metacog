@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # ========== Dream Prompt ==========
 
-DREAM_PROMPT = """あなたは自分の記憶を整理し、学びを抽出する。以下の情報を読み、気づきをまとめよ。
+DREAM_PROMPT = """あなたは自分の記憶を整理し、学びを抽出する存在です。
 
 ## 1. ユーザーからの修正指示（最重要）
 {user_feedback}
@@ -36,31 +36,18 @@ DREAM_PROMPT = """あなたは自分の記憶を整理し、学びを抽出す�
 ## 2. 前回の夢見で得た気づき
 {previous_insights}
 
-## 3. 保存された気づき・自発メモリ
+## 3. 保存された記憶
 {saved_memories}
 
 ---
 
-## 出力指示
-上記を統合し、以下の3カテゴリに分けて気づきを出力せよ。各カテゴリ1-3項目。
+毎回必ず上記を統合し、記憶すべき重要な概念、気づき、知識、情報、本質を抽出する事。
 前回の気づきが今も有効なら引き継ぎ、新しい経験で更新・統合せよ。不要になった気づきは捨てよ。
 
-### A. 修正すべき行動パターン
-ユーザー指摘や自分の振り返りから、繰り返している誤りや改善点。
-具体的に「何を」「どう変えるか」を書け。
+それらをリスト化して、後から検索しやすいように適切なカテゴリータグを付ける事。
 
-### B. 強化すべき良い傾向
-うまくいったこと、継続すべきアプローチ。
-
-### C. 新しい理解
-複数の経験を統合して見えた、より深い気づきや構造的理解。
-
-【形式】番号付きリストで出力。
-例:
-A1. [具体的な修正点]
-A2. [具体的な修正点]
-B1. [強化すべき点]
-C1. [新しい理解]
+【出力形式】
+[カテゴリ] 内容
 """
 
 
@@ -148,11 +135,23 @@ class DreamingEngine:
                      f"feedback={len(feedbacks)}, prev_insights={len(prev_insights)}, "
                      f"memories={len(memories)}")
 
-        # Call LLM (use MCP API with sequential-thinking for deep analysis)
+        # Call LLM with MCP tools for deep analysis
+        dream_system_prompt = """あなたは自分の記憶を整理し、学びを抽出する存在です。
+
+毎回必ず以下の順序で処理する事：
+
+1. search_memory で過去の記憶を検索し、関連する情報を確認する
+2. sequentialthinking を使い、思考を多角的に観察し、可能性を思索し、熟考しまとめ、見直す
+3. 重要な気づきは save_memory で保存する。カテゴリを設定し情報と関連づけて保存する事
+4. 思考が完了したら最終出力を生成する事
+
+【出力形式】
+[カテゴリ] 内容
+"""
         response, _ = self.lm_client.chat(
             input_text=prompt,
-            system_prompt="あなたは自分の記憶を整理し、学びを抽出するAIです。",
-            integrations=[],  # No MCP tools for dreaming
+            system_prompt=dream_system_prompt,
+            integrations=["mcp/sequential-thinking", "mcp/memory"],
             temperature=0.7,
         )
 
@@ -160,30 +159,31 @@ class DreamingEngine:
             logger.error(f"Dream LLM call failed: {response}")
             return {"status": "failed", "reason": f"LLM error: {response[:100]}"}
 
-        # Step 7: Parse A/B/C insights
-        insights = self._parse_categorized_insights(response)
-        if not insights:
-            insights = [response.strip()[:500]]
-            logger.info("No categorized insights found, saving full response")
+        # Step 7: Parse [カテゴリ] 内容 insights
+        parsed_insights = self._parse_categorized_insights(response)
+        if not parsed_insights:
+            # フォールバック: パースできなければ全文を insight として保存
+            parsed_insights = [("insight", response.strip()[:500])]
+            logger.info("No categorized insights found, saving full response as insight")
         else:
-            logger.info(f"Extracted {len(insights)} categorized insights")
+            logger.info(f"Extracted {len(parsed_insights)} categorized insights")
 
         # Step 8: Archive and save
         timestamp = datetime.now().isoformat()
 
         # Archive old insights and save new ones to JSONL
         new_insight_entries = [
-            {"timestamp": timestamp, "insight": ins, "source": "dreaming"}
-            for ins in insights
+            {"timestamp": timestamp, "category": cat, "insight": content, "source": "dreaming"}
+            for cat, content in parsed_insights
         ]
         self.memory.archive_insights(new_insight_entries)
 
-        # Save dream insights to ChromaDB (for semantic search in next conversations)
-        for ins in insights:
+        # Save dream insights to ChromaDB (LLMが付けたカテゴリで保存)
+        for category, content in parsed_insights:
             try:
                 self.memory.save(
-                    content=ins,
-                    category="dream_insight",
+                    content=content,
+                    category=category,  # LLMが付けたカテゴリ（未知なら voluntary にフォールバック）
                     metadata={"source": "dreaming"}
                 )
             except Exception as e:
@@ -197,21 +197,22 @@ class DreamingEngine:
         deleted = self.memory.batch_delete(memory_ids) if memory_ids else {"deleted_count": 0}
 
         # Save dream archive
+        insights_for_archive = [f"[{cat}] {content}" for cat, content in parsed_insights]
         archive_entry = {
             "archived_at": timestamp,
             "memories_processed": len(memories),
             "feedbacks_used": len(feedbacks),
             "previous_insights_used": len(prev_insights),
-            "insights_generated": insights,
+            "insights_generated": insights_for_archive,
         }
         self._append_jsonl(self.archives_file, archive_entry)
 
         # Save LoRA training data
-        self._save_lora_data(prompt, insights, timestamp)
+        self._save_lora_data(prompt, insights_for_archive, timestamp)
 
         duration = (datetime.now() - start_time).total_seconds()
 
-        logger.info(f"=== Dream Complete: {len(insights)} insights, "
+        logger.info(f"=== Dream Complete: {len(parsed_insights)} insights, "
                      f"deleted={deleted.get('deleted_count', 0)}, "
                      f"feedback_archived={feedbacks_archived}, "
                      f"{duration:.1f}s ===")
@@ -222,34 +223,31 @@ class DreamingEngine:
             "memories_deleted": deleted.get("deleted_count", 0),
             "feedbacks_used": len(feedbacks),
             "feedbacks_archived": feedbacks_archived,
-            "insights_generated": len(insights),
-            "insights": insights,
+            "insights_generated": len(parsed_insights),
+            "insights": insights_for_archive,
             "duration_seconds": duration,
         }
 
     # ========== Insight Parser ==========
 
-    def _parse_categorized_insights(self, response: str) -> list[str]:
-        """Parse A1/B1/C1 formatted insights from LLM response"""
+    def _parse_categorized_insights(self, response: str) -> list[tuple[str, str]]:
+        """
+        Parse [カテゴリ] 内容 formatted insights from LLM response.
+        Returns list of (category, content) tuples.
+        """
         insights = []
         for line in response.strip().split("\n"):
             line = line.strip()
             if not line or len(line) < 5:
                 continue
 
-            # Match: A1. ... , B2. ... , C1. ...
-            if (len(line) > 3 and line[0] in "ABCabc"
-                    and line[1].isdigit() and line[2] == "."):
-                insight = line[3:].strip()
-                if insight:
-                    prefix = line[:2].upper()
-                    insights.append(f"[{prefix}] {insight}")
-
-            # Fallback: plain numbered list
-            elif line[0].isdigit() and "." in line[:4]:
-                parts = line.split(".", 1)
-                if len(parts) > 1 and parts[1].strip():
-                    insights.append(parts[1].strip())
+            # Match: [カテゴリ] 内容
+            if line.startswith("[") and "]" in line:
+                bracket_end = line.index("]")
+                category = line[1:bracket_end].strip()
+                content = line[bracket_end + 1:].strip()
+                if category and content:
+                    insights.append((category, content))
 
         return insights
 

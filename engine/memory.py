@@ -132,24 +132,28 @@ class UnifiedMemory:
     ) -> str:
         """
         Save content to ChromaDB with enhanced metadata
+        Format: [カテゴリ] 内容
         """
         if category not in CATEGORIES:
             logger.warning(f"Unknown category '{category}', using 'voluntary'")
             category = "voluntary"
 
-        # キーワード抽出
+        # [カテゴリ] 内容 形式で統一保存
+        formatted_content = f"[{category}] {content}"
+
+        # キーワード抽出（元のcontentから）
         keywords = extract_keywords(content)
         keywords_str = ",".join(keywords)
 
         memory_id = f"{category}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
 
         # E5モデル用プレフィックス
-        embed_content = f"passage: {content}" if self.embedding_function else content
+        embed_content = f"passage: {formatted_content}" if self.embedding_function else formatted_content
 
         doc_metadata = {
             "category": category,
             "keywords": keywords_str,
-            "original_content": content,
+            "original_content": formatted_content,
             "user_id": "global",
             "created_at": datetime.now().isoformat(),
         }
@@ -162,7 +166,7 @@ class UnifiedMemory:
             metadatas=[doc_metadata]
         )
 
-        logger.debug(f"Saved memory [{category}]: {content[:80]}... | keywords: {keywords_str[:50]}")
+        logger.debug(f"Saved memory: {formatted_content[:80]}... | keywords: {keywords_str[:50]}")
         return memory_id
 
     def search(
@@ -330,8 +334,9 @@ class UnifiedMemory:
 
     def save_insight(self, insight_text: str, source: str = "response") -> str:
         """Save an insight to both ChromaDB and insights.jsonl"""
+        # save() が [category] プレフィックスを付けるので、ここでは内容のみ渡す
         memory_id = self.save(
-            content=f"[Insight] {insight_text}",
+            content=insight_text,
             category="insight",
             metadata={"source": source}
         )

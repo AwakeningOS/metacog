@@ -360,12 +360,15 @@ def save_memory(
         category = "voluntary"
 
     try:
-        # キーワード自動抽出
+        # [カテゴリ] 内容 形式で統一保存
+        formatted_content = f"[{category}] {content}"
+
+        # キーワード自動抽出（元のcontentから）
         keywords = extract_keywords(content)
         keywords_str = ",".join(keywords)
 
         # E5モデル用のプレフィックス（保存時は passage: を使用）
-        embed_content = f"passage: {content}" if _embedding_function else content
+        embed_content = f"passage: {formatted_content}" if _embedding_function else formatted_content
 
         memory_id = f"{category}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}"
 
@@ -375,7 +378,7 @@ def save_memory(
             metadatas=[{
                 "category": category,
                 "keywords": keywords_str,
-                "original_content": content,  # 元のコンテンツも保存
+                "original_content": formatted_content,  # [カテゴリ] 内容 形式で保存
                 "user_id": "global",
                 "created_at": datetime.now().isoformat(),
                 "source": "mcp_tool",
