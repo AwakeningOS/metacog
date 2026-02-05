@@ -114,7 +114,7 @@ def get_dashboard_data():
 
 | 種別 | 件数 | 備考 |
 |---|---|---|
-| 自発メモリ | {stats['voluntary_count']} | 永続 |
+| LLM自発メモリ | {stats['llm_memory_count']} | MCP経由で保存 |
 | 気づき | {stats['insight_count']} | 蒸留対象 |
 | 夢見インサイト | {stats['dream_insight_count']} | 蒸留対象 |
 | **合計** | **{stats['total_chromadb']}** | |

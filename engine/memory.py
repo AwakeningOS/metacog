@@ -314,6 +314,18 @@ class UnifiedMemory:
             counts[cat] = self.count(cat)
         return counts
 
+    def count_by_source(self, source: str) -> int:
+        """Count memories by source (e.g., 'mcp_tool', 'dreaming', 'response')"""
+        try:
+            results = self.collection.get(where={"source": source})
+            return len(results["ids"])
+        except Exception:
+            return 0
+
+    def get_llm_memory_count(self) -> int:
+        """Count memories saved by LLM via MCP (voluntary memories)"""
+        return self.count_by_source("mcp_tool")
+
     # ========== Insights ==========
 
     def save_insight(self, insight_text: str, source: str = "response") -> str:

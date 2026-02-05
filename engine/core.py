@@ -208,8 +208,8 @@ class AwarenessEngine:
 
     def get_stats(self) -> dict:
         """Get system statistics"""
-        # ChromaDB category counts
-        voluntary_count = self.memory.count(category="voluntary")
+        # LLM自発メモリ = MCP経由で保存されたもの全て
+        llm_memory_count = self.memory.get_llm_memory_count()
         insight_count_chromadb = self.memory.count(category="insight")
         dream_insight_count = self.memory.count(category="dream_insight")
         total_chromadb = self.memory.count()
@@ -224,7 +224,7 @@ class AwarenessEngine:
 
         return {
             "total_chromadb": total_chromadb,
-            "voluntary_count": voluntary_count,
+            "llm_memory_count": llm_memory_count,
             "insight_count": insight_count_chromadb,
             "dream_insight_count": dream_insight_count,
             "feedback_count": feedback_count,
