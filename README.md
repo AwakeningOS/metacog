@@ -241,6 +241,36 @@ metacog/
 └── README.md
 ```
 
+## Uninstall（アンインストール）
+
+Metacogはレジストリやシステムファイルを一切変更しません。完全に削除するには：
+
+### 1. Metacogフォルダを削除
+
+```
+metacog/ フォルダをそのまま削除するだけでOK
+```
+
+### 2. （任意）埋め込みモデルのキャッシュを削除
+
+初回起動時にダウンロードされた埋め込みモデルを削除する場合：
+
+```
+# Windows
+%USERPROFILE%\.cache\huggingface\hub\models--intfloat--multilingual-e5-small
+
+# Mac/Linux
+~/.cache/huggingface/hub/models--intfloat--multilingual-e5-small
+```
+
+### 3. （任意）デスクトップショートカットを削除
+
+`create_shortcut.vbs` で作成した場合、デスクトップの `Metacog.lnk` を削除。
+
+---
+
+**注意**: LM Studio、Python、MCPサーバー（sequential-thinking等）は別途インストールしたものなので、Metacog削除では消えません。それらも不要な場合は個別にアンインストールしてください。
+
 ## License
 
 MIT License
