@@ -444,11 +444,11 @@ def create_app():
                         )
                         with gr.Row():
                             msg_input = gr.Textbox(
-                                placeholder="メッセージを入力... (Enter送信 / Shift+Enter改行)",
+                                placeholder="メッセージを入力...",
                                 label="入力",
                                 scale=5,
-                                lines=2,
-                                submit_btn=True,
+                                lines=1,
+                                max_lines=5,
                             )
                             send_btn = gr.Button("送信", variant="primary", scale=1)
 
