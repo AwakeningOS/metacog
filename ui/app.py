@@ -223,7 +223,6 @@ def trigger_dream_with_selection(selected_memory_ids: list, selected_feedback_id
 **【夢見入力】**
 - 使用した記憶: {result.get('memories_processed', 0)}件 → アーカイブに移動
 - ユーザーフィードバック: {result.get('feedbacks_used', 0)}件
-- 前回の夢見で生成した記憶: {result.get('previous_insights_used', 0)}件
 
 **【生成された記憶】**（ChromaDBに保存済み）
 {generated_memories}
@@ -249,7 +248,6 @@ def reset_memory():
 - ChromaDB: {result.get('chromadb_deleted', 0)}件 削除
 - インサイト: {result.get('insights_deleted', 0)}件 削除
 - フィードバック: {result.get('feedback_deleted', 0)}件 削除
-- 思考ログ: {result.get('thought_logs_deleted', 0)}件 削除
 
 記憶が初期化されました。"""
 
@@ -263,14 +261,12 @@ def reset_everything():
 - ChromaDB: {result.get('chromadb_deleted', 0)}件 削除
 - インサイト: {result.get('insights_deleted', 0)}件 削除
 - フィードバック: {result.get('feedback_deleted', 0)}件 削除
-- 思考ログ: {result.get('thought_logs_deleted', 0)}件 削除
 
 **アーカイブ・ログ:**
 - 記憶アーカイブ: {result.get('memory_archive_deleted', 0)}件 削除
 - 夢見アーカイブ: {result.get('dream_archives_deleted', 0)}件 削除
 - インサイトアーカイブ: {result.get('insights_archived_deleted', 0)}件 削除
 - フィードバックアーカイブ: {result.get('feedback_archived_deleted', 0)}件 削除
-- LoRAデータ: {result.get('lora_dataset_deleted', 0)}件 削除
 
 全てのデータが完全に削除されました。"""
 
@@ -448,10 +444,11 @@ def create_app():
                         )
                         with gr.Row():
                             msg_input = gr.Textbox(
-                                placeholder="メッセージを入力...",
+                                placeholder="メッセージを入力... (Enter送信 / Shift+Enter改行)",
                                 label="入力",
                                 scale=5,
                                 lines=2,
+                                submit_btn=True,
                             )
                             send_btn = gr.Button("送信", variant="primary", scale=1)
 
@@ -768,7 +765,7 @@ def create_app():
                         )
 
                         gr.Markdown("#### 🌙 夢見用プロンプト")
-                        gr.Markdown("*`{user_feedback}`, `{previous_insights}`, `{saved_memories}` が自動置換されます*")
+                        gr.Markdown("*`{user_feedback}`, `{saved_memories}` が自動置換されます*")
                         dream_prompt_input = gr.Textbox(
                             value=config.get("dream_prompt", DREAM_PROMPT),
                             label="",

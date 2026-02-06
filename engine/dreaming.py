@@ -7,7 +7,7 @@ insights that are saved to memory for future retrieval.
 Simplified from previous project:
 - Single memory source (UnifiedMemory) instead of three
 - Removed MCP memory / Moltbook / SimpleMemory
-- Added thought_logs as new dream input source
+- Simplified input: ChromaDB memories + user feedback only
 - Natural language output (no categories - semantic search handles retrieval)
 - Same insight carry-forward mechanism
 """
@@ -81,15 +81,7 @@ class DreamingEngine:
         else:
             feedback_text = "(ユーザーからの修正指示なし)"
 
-        # Step 3: Format previous insights (carry-forward)
-        prev_insights = export.get("insights", [])
-        if prev_insights:
-            prev_lines = [f"- {e.get('insight', '')}" for e in prev_insights]
-            previous_text = "\n".join(prev_lines)
-        else:
-            previous_text = "(前回の気づきなし)"
-
-        # Step 4: Format saved memories (insights + voluntary)
+        # Step 3: Format saved memories
         if memories:
             memory_lines = []
             for mem in memories:
@@ -100,32 +92,21 @@ class DreamingEngine:
         else:
             memories_text = "(保存された記憶なし)"
 
-        # Step 5: Build and send dream prompt (load from config)
+        # Step 4: Build and send dream prompt (load from config)
         config = load_config()
         dream_prompt_template = config.get("dream_prompt", DREAM_PROMPT)
-        prompt = dream_prompt_template.format(
+        dream_system_prompt = dream_prompt_template.format(
             user_feedback=feedback_text,
-            previous_insights=previous_text,
             saved_memories=memories_text,
         )
 
-        logger.info(f"Dream prompt: {len(prompt)} chars | "
-                     f"feedback={len(feedbacks)}, prev_insights={len(prev_insights)}, "
-                     f"memories={len(memories)}")
+        logger.info(f"Dream prompt: {len(dream_system_prompt)} chars | "
+                     f"feedback={len(feedbacks)}, memories={len(memories)}")
 
         # Call LLM with MCP tools for deep analysis
-        dream_system_prompt = """あなたは自分の記憶を整理し、学びを抽出する存在です。
-
-毎回必ず以下の順序で処理する事：
-
-1. 与えられた記憶を読み込み、内容を把握する
-2. sequentialthinking を使い、思考を多角的に観察し、可能性を思索し、熟考しまとめ、見直す
-3. 思考が完了したら最終出力を生成する
-
-出力は後から検索しやすい自然な文章で。各項目は「- 」で始める1行の箇条書き。
-"""
+        # UIの夢見プロンプトをシステムプロンプトとして直接使用
         response, _ = self.lm_client.chat(
-            input_text=prompt,
+            input_text="上記の指示に従って処理を実行してください。",
             system_prompt=dream_system_prompt,
             integrations=["mcp/sequential-thinking"],
             temperature=0.7,
@@ -178,7 +159,6 @@ class DreamingEngine:
             "memories_processed": len(memories),
             "memories_archived": archive_result.get("archived_count", 0),
             "feedbacks_used": len(feedbacks),
-            "previous_insights_used": len(prev_insights),
             "insights_generated": parsed_insights,
         }
         self._append_jsonl(self.archives_file, archive_entry)
@@ -199,7 +179,6 @@ class DreamingEngine:
             "insights_generated": len(parsed_insights),
             "insights": parsed_insights,
             "duration_seconds": duration,
-            "previous_insights_used": len(prev_insights),
         }
 
     # ========== Insight Parser ==========

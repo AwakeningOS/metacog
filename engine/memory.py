@@ -107,7 +107,6 @@ class UnifiedMemory:
 
         # File paths
         self.insights_file = self.data_dir / "insights.jsonl"
-        self.thought_logs_file = self.data_dir / "thought_logs.jsonl"
         self.feedback_file = self.data_dir / "feedback.jsonl"
 
         # RAM cache for insights
@@ -375,30 +374,6 @@ class UnifiedMemory:
         """Get recent feedback entries"""
         return self._read_jsonl(self.feedback_file)[-limit:]
 
-    # ========== Thought Logs ==========
-
-    def save_thought_log(
-        self,
-        step: str,
-        thought: str,
-        memories_found: int = 0,
-        extra: Optional[dict] = None
-    ):
-        """Save a thinking step log"""
-        entry = {
-            "timestamp": datetime.now().isoformat(),
-            "step": step,
-            "thought": thought,
-            "memories_found": memories_found,
-        }
-        if extra:
-            entry.update(extra)
-        self._append_jsonl(self.thought_logs_file, entry)
-
-    def get_thought_logs(self, limit: int = 20) -> list[dict]:
-        """Get recent thought logs"""
-        return self._read_jsonl(self.thought_logs_file)[-limit:]
-
     # ========== Dreaming Support ==========
 
     def export_for_dreaming(self) -> dict:
@@ -420,8 +395,6 @@ class UnifiedMemory:
         return {
             "memories": all_memories,
             "feedback": self.get_feedback(),
-            "insights": self.get_all_insights(),
-            "thought_logs": self.get_thought_logs(limit=20),
             "total_memory_count": len(all_memories),
             "category_counts": self.get_category_counts(),
         }
@@ -634,12 +607,11 @@ class UnifiedMemory:
     # ========== Reset ==========
 
     def reset_all(self) -> dict:
-        """Delete all memories, insights, feedback, thought logs"""
+        """Delete all memories, insights, feedback"""
         result = {
             "chromadb_deleted": 0,
             "insights_deleted": 0,
             "feedback_deleted": 0,
-            "thought_logs_deleted": 0,
         }
 
         # ChromaDB: delete all
@@ -655,7 +627,6 @@ class UnifiedMemory:
         for name, filepath in [
             ("insights", self.insights_file),
             ("feedback", self.feedback_file),
-            ("thought_logs", self.thought_logs_file),
         ]:
             if filepath.exists():
                 try:
