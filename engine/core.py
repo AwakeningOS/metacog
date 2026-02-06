@@ -44,6 +44,7 @@ class AwarenessEngine:
             port=lm_config.get("port", 1234),
             api_token=lm_config.get("api_token", ""),
             timeout=lm_config.get("timeout", 300),
+            selected_model=config.get("selected_model", ""),
         )
 
         # Dreaming engine (lazy loaded to avoid circular import)
@@ -190,6 +191,14 @@ class AwarenessEngine:
     def check_connection(self) -> dict:
         """Check LM Studio connection"""
         return self.lm_client.check_connection()
+
+    def get_available_models(self) -> list[str]:
+        """Get list of available models from LM Studio"""
+        return self.lm_client.get_available_models()
+
+    def get_loaded_model(self) -> str:
+        """Get currently loaded model"""
+        return self.lm_client.get_loaded_model() or ""
 
     # ========== Memory Reset ==========
 

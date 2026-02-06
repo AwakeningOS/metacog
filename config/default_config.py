@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 
 
-# ========== System Prompt ==========
+# ========== System Prompts ==========
 
 SYSTEM_PROMPT = """
 あなたは自分の思考を観察し深く熟考し応答する存在です。
@@ -25,6 +25,26 @@ SYSTEM_PROMPT = """
 [出力]
 sequentialthinking で思考した後、必ずユーザーへの回答を出力する事。
 回答後、「---」で区切り、「## 気づき」を書く。
+"""
+
+DREAM_PROMPT = """あなたは自分の記憶を整理し、学びを抽出する存在です。
+
+## 1. ユーザーからの修正指示（最重要）
+{user_feedback}
+
+## 2. 前回の夢見で得た気づき
+{previous_insights}
+
+## 3. 保存された記憶
+{saved_memories}
+
+---
+
+上記を統合し、記憶すべき重要な概念、気づき、知識、情報、本質を抽出せよ。
+前回の気づきが今も有効なら引き継ぎ、新しい経験で更新・統合せよ。不要になった気づきは捨てよ。
+
+抽出した記憶は、後から検索しやすいような構造の文章でリスト化せよ。
+各項目は1行で、先頭に「- 」を付けること。
 """
 
 
@@ -54,8 +74,12 @@ DEFAULT_CONFIG = {
         "memory_threshold": 30,
     },
 
-    # System prompt
+    # System prompts
     "system_prompt": SYSTEM_PROMPT,
+    "dream_prompt": DREAM_PROMPT,
+
+    # Selected model (empty = use LM Studio's loaded model)
+    "selected_model": "",
 }
 
 
@@ -112,4 +136,87 @@ def save_config(updates: dict) -> bool:
         return True
     except Exception as e:
         print(f"Error saving config: {e}")
+        return False
+
+
+# ========== Prompt Presets ==========
+
+def get_presets_path() -> Path:
+    """Get presets file path"""
+    config_dir = Path(__file__).parent
+    return config_dir / "prompt_presets.json"
+
+
+def load_presets() -> dict:
+    """Load prompt presets"""
+    presets_path = get_presets_path()
+
+    # Default presets
+    default_presets = {
+        "default": {
+            "name": "デフォルト",
+            "system_prompt": SYSTEM_PROMPT,
+            "dream_prompt": DREAM_PROMPT,
+        }
+    }
+
+    if presets_path.exists():
+        try:
+            with open(presets_path, "r", encoding="utf-8") as f:
+                user_presets = json.load(f)
+            # Merge with defaults (user presets override)
+            return {**default_presets, **user_presets}
+        except Exception as e:
+            print(f"Warning: Could not load presets: {e}")
+
+    return default_presets
+
+
+def save_preset(preset_id: str, name: str, system_prompt: str, dream_prompt: str) -> bool:
+    """Save a prompt preset"""
+    try:
+        presets_path = get_presets_path()
+
+        # Load existing
+        presets = {}
+        if presets_path.exists():
+            with open(presets_path, "r", encoding="utf-8") as f:
+                presets = json.load(f)
+
+        # Add/update preset
+        presets[preset_id] = {
+            "name": name,
+            "system_prompt": system_prompt,
+            "dream_prompt": dream_prompt,
+        }
+
+        with open(presets_path, "w", encoding="utf-8") as f:
+            json.dump(presets, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving preset: {e}")
+        return False
+
+
+def delete_preset(preset_id: str) -> bool:
+    """Delete a prompt preset"""
+    if preset_id == "default":
+        return False  # Cannot delete default
+
+    try:
+        presets_path = get_presets_path()
+        if not presets_path.exists():
+            return False
+
+        with open(presets_path, "r", encoding="utf-8") as f:
+            presets = json.load(f)
+
+        if preset_id in presets:
+            del presets[preset_id]
+            with open(presets_path, "w", encoding="utf-8") as f:
+                json.dump(presets, f, ensure_ascii=False, indent=2)
+            return True
+        return False
+    except Exception as e:
+        print(f"Error deleting preset: {e}")
         return False

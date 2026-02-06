@@ -2,13 +2,13 @@
 Dreaming Engine — Feedback Learning Loop
 
 Processes accumulated memories, feedback, and thought logs to generate
-A/B/C categorized insights that are injected into future conversations.
+insights that are saved to memory for future retrieval.
 
 Simplified from previous project:
 - Single memory source (UnifiedMemory) instead of three
 - Removed MCP memory / Moltbook / SimpleMemory
 - Added thought_logs as new dream input source
-- Same proven A/B/C output format
+- Natural language output (no categories - semantic search handles retrieval)
 - Same insight carry-forward mechanism
 """
 
@@ -19,34 +19,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
+from config.default_config import DREAM_PROMPT, load_config
+
 if TYPE_CHECKING:
     from .memory import UnifiedMemory
     from .lm_studio import LMStudioClient
 
 logger = logging.getLogger(__name__)
-
-
-# ========== Dream Prompt ==========
-
-DREAM_PROMPT = """あなたは自分の記憶を整理し、学びを抽出する存在です。
-
-## 1. ユーザーからの修正指示（最重要）
-{user_feedback}
-
-## 2. 前回の夢見で得た気づき
-{previous_insights}
-
-## 3. 保存された記憶
-{saved_memories}
-
----
-
-上記を統合し、記憶すべき重要な概念、気づき、知識、情報、本質を抽出せよ。
-前回の気づきが今も有効なら引き継ぎ、新しい経験で更新・統合せよ。不要になった気づきは捨てよ。
-
-抽出した記憶は、後から検索しやすいような構造の文章でリスト化せよ。
-各項目は1行で、先頭に「- 」を付けること。
-"""
 
 
 class DreamingEngine:
@@ -121,8 +100,10 @@ class DreamingEngine:
         else:
             memories_text = "(保存された記憶なし)"
 
-        # Step 5: Build and send dream prompt
-        prompt = DREAM_PROMPT.format(
+        # Step 5: Build and send dream prompt (load from config)
+        config = load_config()
+        dream_prompt_template = config.get("dream_prompt", DREAM_PROMPT)
+        prompt = dream_prompt_template.format(
             user_feedback=feedback_text,
             previous_insights=previous_text,
             saved_memories=memories_text,

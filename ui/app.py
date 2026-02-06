@@ -17,7 +17,10 @@ import gradio as gr
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from config.default_config import load_config, save_config
+from config.default_config import (
+    load_config, save_config, load_presets, save_preset, delete_preset,
+    SYSTEM_PROMPT, DREAM_PROMPT
+)
 from engine.core import AwarenessEngine
 
 logging.basicConfig(
@@ -275,8 +278,10 @@ def test_connection():
         return f"❌ エラー: {result.get('error', '')}"
 
 
-def save_settings(host, port, api_token, dream_threshold):
-    """Save user settings"""
+def save_settings(host, port, api_token, dream_threshold, selected_model):
+    """Save user settings including model selection"""
+    logger.info(f"save_settings called with selected_model={selected_model}")
+
     updates = {
         "lm_studio": {
             "host": host,
@@ -286,16 +291,122 @@ def save_settings(host, port, api_token, dream_threshold):
         "dreaming": {
             "memory_threshold": int(dream_threshold),
         },
+        "selected_model": selected_model,
     }
 
     if save_config(updates):
         # Reinitialize engine with new config
         global engine, config
         config = load_config()
+        logger.info(f"After reload, config selected_model={config.get('selected_model')}")
         engine = AwarenessEngine(config=config, data_dir=data_dir)
-        return "✅ 設定を保存しました"
+        logger.info(f"Engine lm_client.selected_model={engine.lm_client.selected_model}")
+        return f"✅ 設定を保存しました（モデル: {selected_model or '自動検出'}）"
     else:
         return "❌ 設定の保存に失敗しました"
+
+
+# ========== Prompt & Model Handlers ==========
+
+def get_model_choices():
+    """Get available models from LM Studio"""
+    try:
+        models = engine.get_available_models()
+        # Get saved selection from config file (reload to get latest)
+        current_config = load_config()
+        saved_model = current_config.get("selected_model", "")
+        logger.info(f"get_model_choices: models={models}, saved_model={saved_model}")
+        if models:
+            # If saved model exists in list, use it; otherwise use first model
+            if saved_model and saved_model in models:
+                return models, saved_model
+            return models, models[0]
+        return ["(モデルなし)"], "(モデルなし)"
+    except Exception as e:
+        logger.error(f"get_model_choices error: {e}")
+        return ["(接続エラー)"], "(接続エラー)"
+
+
+def refresh_models():
+    """Refresh model list from LM Studio"""
+    try:
+        models = engine.get_available_models()
+        logger.info(f"refresh_models: found {len(models)} models: {models}")
+        if models:
+            # Don't auto-select - just update the list, keep current dropdown value
+            return gr.update(choices=models)
+        return gr.update(choices=["(モデルなし)"])
+    except Exception as e:
+        logger.error(f"refresh_models error: {e}")
+        return gr.update(choices=["(接続エラー)"])
+
+
+def save_prompts(system_prompt, dream_prompt, selected_model):
+    """Save system prompts and model selection"""
+    updates = {
+        "system_prompt": system_prompt,
+        "dream_prompt": dream_prompt,
+        "selected_model": selected_model,
+    }
+
+    if save_config(updates):
+        global engine, config
+        config = load_config()
+        engine = AwarenessEngine(config=config, data_dir=data_dir)
+        return "✅ プロンプトを保存しました"
+    else:
+        return "❌ 保存に失敗しました"
+
+
+def get_preset_choices():
+    """Get preset list for dropdown"""
+    presets = load_presets()
+    return [(v["name"], k) for k, v in presets.items()]
+
+
+def load_preset_prompts(preset_id):
+    """Load prompts from a preset"""
+    presets = load_presets()
+    if preset_id in presets:
+        preset = presets[preset_id]
+        return preset["system_prompt"], preset["dream_prompt"], f"✅ 「{preset['name']}」を読み込みました"
+    return "", "", "❌ プリセットが見つかりません"
+
+
+def save_new_preset(preset_name, system_prompt, dream_prompt):
+    """Save current prompts as a new preset"""
+    if not preset_name.strip():
+        return gr.update(), "❌ プリセット名を入力してください"
+
+    # Generate ID from name
+    import re
+    preset_id = re.sub(r'[^\w]', '_', preset_name.lower())
+
+    if save_preset(preset_id, preset_name, system_prompt, dream_prompt):
+        choices = get_preset_choices()
+        return gr.update(choices=choices, value=preset_id), f"✅ 「{preset_name}」を保存しました"
+    else:
+        return gr.update(), "❌ 保存に失敗しました"
+
+
+def delete_current_preset(preset_id):
+    """Delete the selected preset"""
+    if preset_id == "default":
+        return gr.update(), "❌ デフォルトプリセットは削除できません"
+
+    presets = load_presets()
+    preset_name = presets.get(preset_id, {}).get("name", preset_id)
+
+    if delete_preset(preset_id):
+        choices = get_preset_choices()
+        return gr.update(choices=choices, value="default"), f"✅ 「{preset_name}」を削除しました"
+    else:
+        return gr.update(), "❌ 削除に失敗しました"
+
+
+def reset_to_default():
+    """Reset prompts to default values"""
+    return SYSTEM_PROMPT, DREAM_PROMPT, "✅ デフォルトに戻しました"
 
 
 # ========== Build UI ==========
@@ -607,76 +718,181 @@ def create_app():
 
             # ========== Tab 4: Settings ==========
             with gr.TabItem("⚙️ 設定"):
-                gr.Markdown("### LM Studio 接続設定")
 
-                with gr.Row():
-                    host_input = gr.Textbox(
-                        value=config.get("lm_studio", {}).get("host", "localhost"),
-                        label="Host",
-                    )
-                    port_input = gr.Number(
-                        value=config.get("lm_studio", {}).get("port", 1234),
-                        label="Port",
-                        precision=0,
-                    )
+                with gr.Tabs():
+                    # ===== Sub-tab: Prompts =====
+                    with gr.TabItem("📝 プロンプト"):
+                        gr.Markdown("### システムプロンプト設定")
 
-                api_token_input = gr.Textbox(
-                    value=config.get("lm_studio", {}).get("api_token", ""),
-                    label="API Token",
-                    type="password",
-                )
+                        # Preset management
+                        with gr.Row():
+                            preset_dropdown = gr.Dropdown(
+                                choices=get_preset_choices(),
+                                value="default",
+                                label="プリセット",
+                                scale=3,
+                            )
+                            load_preset_btn = gr.Button("📂 読込", scale=1)
+                            delete_preset_btn = gr.Button("🗑️ 削除", scale=1)
 
-                conn_btn = gr.Button("接続テスト")
-                conn_status = gr.Textbox(label="接続状態", interactive=False)
+                        with gr.Row():
+                            new_preset_name = gr.Textbox(
+                                placeholder="新しいプリセット名...",
+                                label="プリセット名",
+                                scale=3,
+                            )
+                            save_preset_btn = gr.Button("💾 新規保存", scale=1)
 
-                gr.Markdown("---")
-                gr.Markdown("### 🗑️ データリセット")
+                        preset_status = gr.Textbox(label="ステータス", interactive=False)
 
-                gr.Markdown("**通常リセット**: 記憶、フィードバック、思考ログを削除（アーカイブは保持）")
-                reset_btn = gr.Button(
-                    "🗑️ 記憶を消去",
-                    variant="stop",
-                )
+                        gr.Markdown("---")
 
-                gr.Markdown("**完全リセット**: 全データ（記憶 + アーカイブ + ログ全て）を完全削除")
-                reset_all_btn = gr.Button(
-                    "⚠️ 全データを完全消去",
-                    variant="stop",
-                )
+                        # Chat system prompt
+                        gr.Markdown("#### 💬 チャット用システムプロンプト")
+                        system_prompt_input = gr.Textbox(
+                            value=config.get("system_prompt", SYSTEM_PROMPT),
+                            label="",
+                            lines=12,
+                            max_lines=20,
+                        )
 
-                reset_result = gr.Markdown(label="リセット結果")
+                        gr.Markdown("#### 🌙 夢見用プロンプト")
+                        gr.Markdown("*`{user_feedback}`, `{previous_insights}`, `{saved_memories}` が自動置換されます*")
+                        dream_prompt_input = gr.Textbox(
+                            value=config.get("dream_prompt", DREAM_PROMPT),
+                            label="",
+                            lines=12,
+                            max_lines=20,
+                        )
 
-                reset_btn.click(
-                    reset_memory,
-                    outputs=[reset_result],
-                )
-                reset_all_btn.click(
-                    reset_everything,
-                    outputs=[reset_result],
-                )
+                        with gr.Row():
+                            reset_prompts_btn = gr.Button("🔄 デフォルトに戻す")
+                            save_prompts_btn = gr.Button("💾 プロンプトを保存", variant="primary")
 
-                gr.Markdown("---")
-                gr.Markdown("### 夢見設定")
+                        prompts_status = gr.Textbox(label="保存状態", interactive=False)
 
-                dream_threshold_input = gr.Number(
-                    value=config.get("dreaming", {}).get("memory_threshold", 30),
-                    label="夢見トリガー閾値（メモリ数）",
-                    precision=0,
-                )
+                        # Prompt events
+                        load_preset_btn.click(
+                            load_preset_prompts,
+                            inputs=[preset_dropdown],
+                            outputs=[system_prompt_input, dream_prompt_input, preset_status],
+                        )
+                        save_preset_btn.click(
+                            save_new_preset,
+                            inputs=[new_preset_name, system_prompt_input, dream_prompt_input],
+                            outputs=[preset_dropdown, preset_status],
+                        )
+                        delete_preset_btn.click(
+                            delete_current_preset,
+                            inputs=[preset_dropdown],
+                            outputs=[preset_dropdown, preset_status],
+                        )
+                        reset_prompts_btn.click(
+                            reset_to_default,
+                            outputs=[system_prompt_input, dream_prompt_input, prompts_status],
+                        )
 
-                save_btn = gr.Button("設定を保存", variant="primary")
-                save_status = gr.Textbox(label="保存状態", interactive=False)
+                    # ===== Sub-tab: Model & Connection =====
+                    with gr.TabItem("🔌 接続・モデル"):
+                        gr.Markdown("### LM Studio 接続設定")
 
-                # Settings events
-                conn_btn.click(
-                    test_connection,
-                    outputs=[conn_status],
-                )
-                save_btn.click(
-                    save_settings,
-                    inputs=[host_input, port_input, api_token_input, dream_threshold_input],
-                    outputs=[save_status],
-                )
+                        with gr.Row():
+                            host_input = gr.Textbox(
+                                value=config.get("lm_studio", {}).get("host", "localhost"),
+                                label="Host",
+                            )
+                            port_input = gr.Number(
+                                value=config.get("lm_studio", {}).get("port", 1234),
+                                label="Port",
+                                precision=0,
+                            )
+
+                        api_token_input = gr.Textbox(
+                            value=config.get("lm_studio", {}).get("api_token", ""),
+                            label="API Token",
+                            type="password",
+                        )
+
+                        conn_btn = gr.Button("接続テスト")
+                        conn_status = gr.Textbox(label="接続状態", interactive=False)
+
+                        gr.Markdown("---")
+                        gr.Markdown("### 🤖 モデル選択")
+
+                        models, current_model = get_model_choices()
+                        with gr.Row():
+                            model_dropdown = gr.Dropdown(
+                                choices=models,
+                                value=config.get("selected_model") or current_model,
+                                label="使用モデル",
+                                scale=4,
+                            )
+                            refresh_models_btn = gr.Button("🔄 更新", scale=1)
+
+                        gr.Markdown("*LM Studioで読み込んだモデルが表示されます*")
+
+                        gr.Markdown("---")
+                        gr.Markdown("### 夢見設定")
+
+                        dream_threshold_input = gr.Number(
+                            value=config.get("dreaming", {}).get("memory_threshold", 30),
+                            label="夢見トリガー閾値（メモリ数）",
+                            precision=0,
+                        )
+
+                        save_btn = gr.Button("設定を保存", variant="primary")
+                        save_status = gr.Textbox(label="保存状態", interactive=False)
+
+                        # Connection & Model events
+                        conn_btn.click(
+                            test_connection,
+                            outputs=[conn_status],
+                        )
+                        refresh_models_btn.click(
+                            refresh_models,
+                            outputs=[model_dropdown],
+                        )
+                        save_btn.click(
+                            save_settings,
+                            inputs=[host_input, port_input, api_token_input, dream_threshold_input, model_dropdown],
+                            outputs=[save_status],
+                        )
+
+                        # Save prompts with model (connected to prompts tab)
+                        save_prompts_btn.click(
+                            save_prompts,
+                            inputs=[system_prompt_input, dream_prompt_input, model_dropdown],
+                            outputs=[prompts_status],
+                        )
+
+                    # ===== Sub-tab: Data Reset =====
+                    with gr.TabItem("🗑️ データ管理"):
+                        gr.Markdown("### データリセット")
+
+                        gr.Markdown("**通常リセット**: 記憶、フィードバック、思考ログを削除（アーカイブは保持）")
+                        reset_btn = gr.Button(
+                            "🗑️ 記憶を消去",
+                            variant="stop",
+                        )
+
+                        gr.Markdown("---")
+
+                        gr.Markdown("**完全リセット**: 全データ（記憶 + アーカイブ + ログ全て）を完全削除")
+                        reset_all_btn = gr.Button(
+                            "⚠️ 全データを完全消去",
+                            variant="stop",
+                        )
+
+                        reset_result = gr.Markdown(label="リセット結果")
+
+                        reset_btn.click(
+                            reset_memory,
+                            outputs=[reset_result],
+                        )
+                        reset_all_btn.click(
+                            reset_everything,
+                            outputs=[reset_result],
+                        )
 
         # ========== Global: Shutdown Button ==========
         def shutdown_server():

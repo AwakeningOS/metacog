@@ -16,8 +16,8 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-# Default model for JIT auto-loading
-DEFAULT_MODEL = "qwen/qwen3-30b-a3b-2507"
+# Fallback model if nothing is configured or loaded
+FALLBACK_MODEL = "qwen/qwen3-30b-a3b-2507"
 
 
 class LMStudioClient:
@@ -29,11 +29,13 @@ class LMStudioClient:
         port: int = 1234,
         api_token: str = "",
         timeout: int = 300,
+        selected_model: str = "",
     ):
         self.host = host
         self.port = port
         self.api_token = api_token
         self.timeout = timeout
+        self.selected_model = selected_model  # User-selected model from config
 
         self.base_url = f"http://{host}:{port}"
         self.mcp_url = f"{self.base_url}/api/v1/chat"
@@ -92,6 +94,22 @@ class LMStudioClient:
             pass
         return None
 
+    def get_available_models(self) -> list[str]:
+        """Get list of all available models in LM Studio"""
+        try:
+            response = requests.get(
+                self.models_url,
+                headers=self._get_headers(),
+                timeout=5,
+            )
+
+            if response.status_code == 200:
+                models = response.json().get("models", [])
+                return [m["key"] for m in models if "key" in m]
+        except Exception:
+            pass
+        return []
+
     # ========== Chat ==========
 
     def chat(
@@ -115,11 +133,17 @@ class LMStudioClient:
         Returns:
             tuple: (response_text, metadata_dict)
         """
-        # Get model — JIT auto-loads if none loaded
-        model = self.get_loaded_model()
-        if not model:
-            model = DEFAULT_MODEL
-            logger.info(f"No model loaded, JIT will load: {model}")
+        # Get model — Priority: 1) selected_model from config, 2) loaded model, 3) fallback
+        if self.selected_model:
+            model = self.selected_model
+            logger.info(f"Using configured model: {model}")
+        else:
+            model = self.get_loaded_model()
+            if not model:
+                model = FALLBACK_MODEL
+                logger.info(f"No model configured/loaded, using fallback: {model}")
+            else:
+                logger.info(f"Using currently loaded model: {model}")
 
         payload = {
             "input": input_text,
