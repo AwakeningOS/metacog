@@ -4,6 +4,18 @@
 
 LLMが単なる応答生成ではなく、**自分の思考を観察しながら応答する**ことで、より深い対話と継続的な自己改善を実現します。
 
+---
+
+## 📘 インストールガイド
+
+**初めての方はこちらをお読みください！**
+
+👉 **[Metacog 完全インストールガイド【Windows編】](https://note.com/jazzy_dill8804/n/nfa61dd378721)**
+
+画像付きで丁寧に解説しています。
+
+---
+
 ## Features
 
 - **Self-Reflective Thinking**: Sequential Thinking MCPを活用した自己再帰的思考
