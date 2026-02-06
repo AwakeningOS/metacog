@@ -10,7 +10,7 @@ LLMが単なる応答生成ではなく、**自分の思考を観察しながら
 
 **初めての方はこちらをお読みください！**
 
-👉 **[Metacog 完全インストールガイド【Windows編】](https://note.com/jazzy_dill8804/n/nfa61dd378721)**
+👉 **[Metacog 完全インストールガイド【MacもOK】](https://note.com/jazzy_dill8804/n/nfa61dd378721)**
 
 画像付きで丁寧に解説しています。
 
