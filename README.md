@@ -104,23 +104,33 @@ AIパートナー（AI恋人）用途では**記憶機能が必須**です。ユ
 
 ## Installation
 
+### 簡単インストール（推奨）
+
 1. リポジトリをクローン:
 ```bash
-git clone https://github.com/YOUR_USERNAME/metacog.git
+git clone https://github.com/AwakeningOS/metacog.git
 cd metacog
 ```
 
-2. 依存関係をインストール:
+2. **`install.bat`** をダブルクリック（Windows）
+   - 自動で依存関係がインストールされます
+   - 初回は数分かかります
+
+3. **`start.bat`** をダブルクリックで起動！
+
+### 手動インストール
+
 ```bash
+git clone https://github.com/AwakeningOS/metacog.git
+cd metacog
 pip install -r requirements.txt
+python metacog.py
 ```
 
-3. 設定ファイルを作成:
-```bash
-cp config/user_config.example.json config/user_config.json
-```
+### 初回起動時の注意
 
-4. `config/user_config.json` を編集してLM StudioのAPIトークンを設定
+- **LM Studio** を先に起動してください
+- 初回は埋め込みモデル（multilingual-e5-small、約500MB）がダウンロードされます
 
 ## LM Studio MCP Setup
 

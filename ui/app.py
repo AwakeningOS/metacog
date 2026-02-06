@@ -13,8 +13,19 @@ from pathlib import Path
 
 import gradio as gr
 
+
+def get_project_root() -> Path:
+    """Get project root (works for both dev and frozen exe)"""
+    if getattr(sys, 'frozen', False):
+        # Running as compiled exe
+        return Path(sys.executable).parent
+    else:
+        # Running as script
+        return Path(__file__).parent.parent
+
+
 # Add project root to path
-project_root = Path(__file__).parent.parent
+project_root = get_project_root()
 sys.path.insert(0, str(project_root))
 
 from config.default_config import (

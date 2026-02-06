@@ -85,10 +85,21 @@ DEFAULT_CONFIG = {
 
 # ========== Config Management ==========
 
+def get_base_dir() -> Path:
+    """Get base directory (works for both dev and frozen exe)"""
+    import sys
+    if getattr(sys, 'frozen', False):
+        # Running as compiled exe - config in exe directory
+        return Path(sys.executable).parent
+    else:
+        # Running as script - config in config directory
+        return Path(__file__).parent
+
+
 def get_config_path() -> Path:
     """Get user config file path"""
-    config_dir = Path(__file__).parent
-    return config_dir / "user_config.json"
+    base_dir = get_base_dir()
+    return base_dir / "user_config.json"
 
 
 def load_config() -> dict:
@@ -143,8 +154,8 @@ def save_config(updates: dict) -> bool:
 
 def get_presets_path() -> Path:
     """Get presets file path"""
-    config_dir = Path(__file__).parent
-    return config_dir / "prompt_presets.json"
+    base_dir = get_base_dir()
+    return base_dir / "prompt_presets.json"
 
 
 def load_presets() -> dict:

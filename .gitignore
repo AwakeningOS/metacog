@@ -22,6 +22,10 @@ env/
 *.egg-info/
 dist/
 build/
+*.spec
+
+# Prompt presets (user-specific)
+config/prompt_presets.json
 
 # IDE
 .vscode/
