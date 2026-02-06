@@ -285,15 +285,16 @@ def test_connection():
         return f"❌ エラー: {result.get('error', '')}"
 
 
-def save_settings(host, port, api_token, dream_threshold, selected_model):
+def save_settings(host, port, api_token, context_length, dream_threshold, selected_model):
     """Save user settings including model selection"""
-    logger.info(f"save_settings called with selected_model={selected_model}")
+    logger.info(f"save_settings called with selected_model={selected_model}, context_length={context_length}")
 
     updates = {
         "lm_studio": {
             "host": host,
             "port": int(port),
             "api_token": api_token,
+            "context_length": int(context_length),
         },
         "dreaming": {
             "memory_threshold": int(dream_threshold),
@@ -840,6 +841,18 @@ def create_app():
                         gr.Markdown("*LM Studioで読み込んだモデルが表示されます*")
 
                         gr.Markdown("---")
+                        gr.Markdown("### コンテキスト長")
+
+                        context_length_slider = gr.Slider(
+                            minimum=4096,
+                            maximum=131072,
+                            step=1024,
+                            value=config.get("lm_studio", {}).get("context_length", 32000),
+                            label="コンテキスト長（トークン数）",
+                        )
+                        gr.Markdown("*モデルの最大コンテキスト長以下に設定してください。長いほどVRAM使用量が増加します。*")
+
+                        gr.Markdown("---")
                         gr.Markdown("### 夢見設定")
 
                         dream_threshold_input = gr.Number(
@@ -862,7 +875,7 @@ def create_app():
                         )
                         save_btn.click(
                             save_settings,
-                            inputs=[host_input, port_input, api_token_input, dream_threshold_input, model_dropdown],
+                            inputs=[host_input, port_input, api_token_input, context_length_slider, dream_threshold_input, model_dropdown],
                             outputs=[save_status],
                         )
 
