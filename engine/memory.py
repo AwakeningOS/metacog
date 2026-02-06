@@ -25,14 +25,8 @@ logger = logging.getLogger(__name__)
 # ========== カテゴリ定義 ==========
 
 CATEGORIES = {
-    "user_info": "ユーザーの名前、年齢、職業、属性などのプロフィール情報",
-    "preference": "好み、嗜好、趣味、好きなもの・嫌いなもの",
-    "episode": "出来事、エピソード、思い出、過去の会話の内容",
-    "instruction": "ユーザーからの指示、ルール、お願い",
-    "fact": "事実情報、知識、学んだこと",
-    "insight": "気づき、洞察、発見",
-    "dream_insight": "Dreamingエンジンからの洞察",
-    "voluntary": "その他の自発的な記憶",
+    "chat": "チャット中に保存された記憶",
+    "dream": "夢見で生成された記憶",
 }
 
 
@@ -132,14 +126,13 @@ class UnifiedMemory:
     ) -> str:
         """
         Save content to ChromaDB with enhanced metadata
-        Format: [カテゴリ] 内容
         """
         if category not in CATEGORIES:
-            logger.warning(f"Unknown category '{category}', using 'voluntary'")
-            category = "voluntary"
+            logger.warning(f"Unknown category '{category}', using 'chat'")
+            category = "chat"
 
-        # [カテゴリ] 内容 形式で統一保存
-        formatted_content = f"[{category}] {content}"
+        # 自然な文章のまま保存（カテゴリプレフィックスは付けない）
+        formatted_content = content.strip()
 
         # キーワード抽出（元のcontentから）
         keywords = extract_keywords(content)
@@ -334,10 +327,9 @@ class UnifiedMemory:
 
     def save_insight(self, insight_text: str, source: str = "response") -> str:
         """Save an insight to both ChromaDB and insights.jsonl"""
-        # save() が [category] プレフィックスを付けるので、ここでは内容のみ渡す
         memory_id = self.save(
             content=insight_text,
-            category="insight",
+            category="chat",  # チャット由来の気づき
             metadata={"source": source}
         )
 
@@ -479,6 +471,140 @@ class UnifiedMemory:
                 failed.append({"id": mid, "error": str(e)})
         return {"deleted_count": deleted, "failed_count": len(failed)}
 
+    # ========== Memory Archive ==========
+
+    def archive_memories(self, memory_ids: list[str]) -> dict:
+        """
+        記憶をChromaDBからアーカイブファイルに移動
+
+        Args:
+            memory_ids: アーカイブ対象の記憶ID一覧
+
+        Returns:
+            {"archived_count": int, "failed": list}
+        """
+        archive_file = self.data_dir / "memory_archive.jsonl"
+        archived = 0
+        failed = []
+        timestamp = datetime.now().isoformat()
+
+        for mid in memory_ids:
+            try:
+                # ChromaDBから記憶を取得
+                result = self.collection.get(ids=[mid])
+                if not result["ids"]:
+                    failed.append({"id": mid, "error": "Not found"})
+                    continue
+
+                # メタデータを構築
+                meta = result["metadatas"][0] if result["metadatas"] else {}
+                content = meta.get("original_content", result["documents"][0] if result["documents"] else "")
+
+                archive_entry = {
+                    "id": mid,
+                    "content": content,
+                    "category": meta.get("category", ""),
+                    "keywords": meta.get("keywords", ""),
+                    "created_at": meta.get("created_at", ""),
+                    "archived_at": timestamp,
+                    "source": meta.get("source", ""),
+                }
+
+                # アーカイブファイルに追記
+                self._append_jsonl(archive_file, archive_entry)
+
+                # ChromaDBから削除
+                self.collection.delete(ids=[mid])
+                archived += 1
+
+            except Exception as e:
+                failed.append({"id": mid, "error": str(e)})
+
+        logger.info(f"Archived {archived} memories to {archive_file}")
+        return {"archived_count": archived, "failed": failed}
+
+    def get_archived_memories(self) -> list[dict]:
+        """アーカイブファイルから全記憶を取得"""
+        archive_file = self.data_dir / "memory_archive.jsonl"
+        return self._read_jsonl(archive_file)
+
+    def restore_memories(self, archive_indices: list[int]) -> dict:
+        """
+        アーカイブからChromaDBに記憶を復元
+
+        Args:
+            archive_indices: 復元対象の行インデックス（0始まり）
+
+        Returns:
+            {"restored_count": int, "failed": list}
+        """
+        archive_file = self.data_dir / "memory_archive.jsonl"
+        all_archived = self._read_jsonl(archive_file)
+
+        restored = 0
+        failed = []
+        indices_to_remove = set()
+
+        for idx in archive_indices:
+            if idx < 0 or idx >= len(all_archived):
+                failed.append({"index": idx, "error": "Invalid index"})
+                continue
+
+            entry = all_archived[idx]
+            try:
+                # ChromaDBに再挿入
+                self.save(
+                    content=entry["content"],
+                    category=entry.get("category", "chat"),
+                    metadata={
+                        "source": entry.get("source", "restored"),
+                        "original_created_at": entry.get("created_at", ""),
+                        "restored_at": datetime.now().isoformat(),
+                    }
+                )
+                indices_to_remove.add(idx)
+                restored += 1
+            except Exception as e:
+                failed.append({"index": idx, "error": str(e)})
+
+        # アーカイブから削除（復元した記憶）
+        self._remove_archive_entries(archive_file, indices_to_remove)
+
+        logger.info(f"Restored {restored} memories from archive")
+        return {"restored_count": restored, "failed": failed}
+
+    def delete_archived_memories(self, archive_indices: list[int]) -> dict:
+        """
+        アーカイブから記憶を完全削除
+
+        Args:
+            archive_indices: 削除対象の行インデックス（0始まり）
+
+        Returns:
+            {"deleted_count": int}
+        """
+        archive_file = self.data_dir / "memory_archive.jsonl"
+        indices_to_remove = set(archive_indices)
+        removed = self._remove_archive_entries(archive_file, indices_to_remove)
+
+        logger.info(f"Permanently deleted {removed} memories from archive")
+        return {"deleted_count": removed}
+
+    def _remove_archive_entries(self, filepath: Path, indices: set) -> int:
+        """アーカイブファイルから指定インデックスのエントリを削除"""
+        if not filepath.exists() or not indices:
+            return 0
+
+        all_entries = self._read_jsonl(filepath)
+        remaining = [e for i, e in enumerate(all_entries) if i not in indices]
+
+        # ファイルを書き換え
+        with open(filepath, "w", encoding="utf-8") as f:
+            for entry in remaining:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+        return len(indices)
+
     # ========== File Utilities ==========
 
     def _append_jsonl(self, filepath: Path, data: dict):
@@ -541,4 +667,32 @@ class UnifiedMemory:
 
         self._cache_dirty = True
         logger.info(f"Memory reset complete: {result}")
+        return result
+
+    def reset_everything(self) -> dict:
+        """Delete ALL data including archives and logs"""
+        result = self.reset_all()
+
+        # Additional files to delete
+        additional_files = [
+            ("memory_archive", self.data_dir / "memory_archive.jsonl"),
+            ("dream_archives", self.data_dir / "dream_archives.jsonl"),
+            ("insights_archived", self.data_dir / "insights.archived.jsonl"),
+            ("feedback_archived", self.data_dir / "feedback.archived.jsonl"),
+            ("lora_dataset", self.data_dir / "lora_dream_dataset.jsonl"),
+        ]
+
+        for name, filepath in additional_files:
+            if filepath.exists():
+                try:
+                    count = len(self._read_jsonl(filepath))
+                    filepath.unlink()  # Delete file completely
+                    result[f"{name}_deleted"] = count
+                except Exception as e:
+                    logger.error(f"Failed to delete {name}: {e}")
+                    result[f"{name}_deleted"] = 0
+            else:
+                result[f"{name}_deleted"] = 0
+
+        logger.info(f"Full reset complete: {result}")
         return result

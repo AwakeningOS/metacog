@@ -168,14 +168,63 @@ class LMStudioClient:
 
             response_text = "\n".join(messages).strip() or "No response"
 
+            # Extract sequential thinking thoughts
+            thoughts = []
+            # デバッグ: tool_callsの中身を確認
+            for tc in tool_calls:
+                logger.debug(f"Tool call: tool={tc.get('tool')}, output_type={type(tc.get('output'))}, output={str(tc.get('output'))[:200]}")
+
+            for tc in tool_calls:
+                if tc.get("tool") == "sequentialthinking":
+                    # argumentsに思考が入っている場合
+                    args = tc.get("arguments", {})
+                    if isinstance(args, dict) and args.get("thought"):
+                        thoughts.append({
+                            "number": args.get("thoughtNumber", 0),
+                            "total": args.get("totalThoughts", 0),
+                            "thought": args.get("thought", ""),
+                        })
+                        continue
+
+                    # outputに結果が入っている場合
+                    output = tc.get("output", "")
+                    if isinstance(output, str):
+                        try:
+                            import json
+                            output_data = json.loads(output)
+                            if isinstance(output_data, dict):
+                                thought = output_data.get("thought", "")
+                                thought_num = output_data.get("thoughtNumber", 0)
+                                total = output_data.get("totalThoughts", 0)
+                                if thought:
+                                    thoughts.append({
+                                        "number": thought_num,
+                                        "total": total,
+                                        "thought": thought,
+                                    })
+                        except:
+                            if output.strip():
+                                thoughts.append({"thought": output, "number": 0, "total": 0})
+                    elif isinstance(output, dict):
+                        thought = output.get("thought", "")
+                        thought_num = output.get("thoughtNumber", 0)
+                        total = output.get("totalThoughts", 0)
+                        if thought:
+                            thoughts.append({
+                                "number": thought_num,
+                                "total": total,
+                                "thought": thought,
+                            })
+
             metadata = {
                 "tool_calls": tool_calls,
+                "thoughts": thoughts,
                 "stats": result.get("stats", {}),
                 "model": model,
             }
 
             logger.info(f"Response received: {len(response_text)} chars, "
-                        f"{len(tool_calls)} tool calls")
+                        f"{len(tool_calls)} tool calls, {len(thoughts)} thoughts")
 
             return response_text, metadata
 

@@ -48,13 +48,8 @@ _embedding_function = None
 # ========== カテゴリ定義 ==========
 
 CATEGORIES = {
-    "user_info": "ユーザーの名前、年齢、職業、属性などのプロフィール情報",
-    "preference": "好み、嗜好、趣味、好きなもの・嫌いなもの",
-    "episode": "出来事、エピソード、思い出、過去の会話の内容",
-    "instruction": "ユーザーからの指示、ルール、お願い",
-    "fact": "事実情報、知識、学んだこと",
-    "insight": "気づき、洞察、発見",
-    "voluntary": "その他の自発的な記憶",
+    "chat": "チャット中に保存された記憶",
+    "dream": "夢見で生成された記憶",
 }
 
 # ========== キーワード抽出 ==========
@@ -173,13 +168,13 @@ def search_memory(
     記憶をハイブリッド検索（セマンティック + キーワード）
 
     使用場面:
-    - 会話開始時にユーザー情報を取得: search_memory("", category="user_info")
-    - 過去の会話を思い出す: search_memory("チョコレートケーキ")
-    - 好みを確認: search_memory("好き", category="preference")
+    - ユーザー情報を検索: search_memory("ユーザーの名前")
+    - 過去の会話を思い出す: search_memory("旅行")
+    - 好みを確認: search_memory("好き")
 
     Args:
-        query: 検索クエリ（空でもOK、カテゴリのみ検索可能）
-        category: カテゴリフィルタ (user_info, preference, episode, instruction, fact, insight, voluntary)
+        query: 検索クエリ（自然な言葉で）
+        category: ソースフィルタ (chat, dream) ※通常は指定不要
         limit: 最大結果数 (default: 8)
 
     Returns:
@@ -325,23 +320,16 @@ def search_memory(
 @mcp.tool()
 def save_memory(
     content: str,
-    category: str = "voluntary"
+    category: str = "chat"
 ) -> dict:
     """
     重要な情報を長期記憶に保存（キーワード自動抽出付き）
 
-    カテゴリガイド:
-    - user_info: 名前、年齢、職業など → "ユーザーの名前: パイパイ"
-    - preference: 好み、趣味 → "好きな食べ物: チョコレートケーキ"
-    - episode: 出来事、思い出 → "2024年に旅行した話"
-    - instruction: 指示、ルール → "敬語で話してほしい"
-    - fact: 事実、知識 → "〇〇について学んだ"
-    - insight: 気づき、洞察
-    - voluntary: その他
+    後から検索しやすい自然な文章で保存すること。
 
     Args:
-        content: 保存する内容（明確で検索しやすい文を推奨）
-        category: カテゴリ (user_info, preference, episode, instruction, fact, insight, voluntary)
+        content: 保存する内容（検索しやすい自然な文章）
+        category: ソース識別用（通常は指定不要）
 
     Returns:
         保存結果
@@ -354,16 +342,15 @@ def save_memory(
     if not content.strip():
         return {"status": "error", "message": "Empty content"}
 
-    # カテゴリ検証
+    # カテゴリ検証（chat/dreamのみ許可、それ以外はchatにフォールバック）
     if category not in CATEGORIES:
-        logger.warning(f"Unknown category '{category}', using 'voluntary'")
-        category = "voluntary"
+        category = "chat"
 
     try:
-        # [カテゴリ] 内容 形式で統一保存
-        formatted_content = f"[{category}] {content}"
+        # 自然な文章のまま保存（カテゴリプレフィックスは付けない）
+        formatted_content = content.strip()
 
-        # キーワード自動抽出（元のcontentから）
+        # キーワード自動抽出
         keywords = extract_keywords(content)
         keywords_str = ",".join(keywords)
 
@@ -378,7 +365,7 @@ def save_memory(
             metadatas=[{
                 "category": category,
                 "keywords": keywords_str,
-                "original_content": formatted_content,  # [カテゴリ] 内容 形式で保存
+                "original_content": formatted_content,
                 "user_id": "global",
                 "created_at": datetime.now().isoformat(),
                 "source": "mcp_tool",
@@ -434,20 +421,6 @@ def memory_stats() -> dict:
     except Exception as e:
         logger.error(f"Stats failed: {e}")
         return {"status": "error", "message": str(e)}
-
-
-@mcp.tool()
-def list_categories() -> dict:
-    """
-    利用可能なカテゴリ一覧を取得
-
-    Returns:
-        カテゴリ名と説明のリスト
-    """
-    return {
-        "status": "ok",
-        "categories": CATEGORIES,
-    }
 
 
 # ========== Entry Point ==========

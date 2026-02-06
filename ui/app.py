@@ -36,8 +36,8 @@ engine = AwarenessEngine(config=config, data_dir=data_dir)
 
 CUSTOM_CSS = """
 .insight-card {
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-    border: 1px solid #4a4a6a;
+    background: #1a1a1a;
+    border: 1px solid #333;
     border-radius: 8px;
     padding: 12px;
     margin: 8px 0;
@@ -49,6 +49,15 @@ CUSTOM_CSS = """
 }
 .dream-button {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+}
+/* チェックボックスをシンプルに */
+.gr-checkbox-group label {
+    background: #1a1a1a !important;
+    color: #ffffff !important;
+    border: 1px solid #333 !important;
+}
+.gr-checkbox-group label:hover {
+    background: #2a2a2a !important;
 }
 """
 
@@ -68,18 +77,38 @@ def send_message(message: str, history: list):
     history.append({"role": "user", "content": message})
     history.append({"role": "assistant", "content": response})
 
-    # Format insights for display
+    # Format thoughts for display
+    thoughts = metadata.get("thoughts", [])
     insights = metadata.get("insights", [])
     saves = metadata.get("saves", [])
-    insight_display = ""
+
+    display_parts = []
+
+    # 思考過程を表示
+    if thoughts:
+        display_parts.append("### 🧠 思考過程")
+        for t in thoughts:
+            num = t.get("number", "?")
+            total = t.get("total", "?")
+            thought = t.get("thought", "")
+            if thought:
+                # 長い思考は省略
+                short = thought[:200] + "..." if len(thought) > 200 else thought
+                display_parts.append(f"\n**[{num}/{total}]** {short}")
+
+    # 気づき
     if insights:
-        insight_display += "### 💭 気づき\n"
+        display_parts.append("\n### 💭 気づき")
         for ins in insights:
-            insight_display += f"- {ins}\n"
+            display_parts.append(f"- {ins}")
+
+    # 保存した記憶
     if saves:
-        insight_display += "\n### 💾 保存した記憶\n"
+        display_parts.append("\n### 💾 保存した記憶")
         for s in saves:
-            insight_display += f"- {s}\n"
+            display_parts.append(f"- {s}")
+
+    insight_display = "\n".join(display_parts)
 
     return history, "", insight_display
 
@@ -102,6 +131,23 @@ def clear_chat():
     return [], "", ""
 
 
+def format_chat_for_copy(history: list) -> str:
+    """Format chat history for clipboard copy"""
+    if not history:
+        return ""
+
+    lines = []
+    for msg in history:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        if role == "user":
+            lines.append(f"【ユーザー】\n{content}")
+        elif role == "assistant":
+            lines.append(f"【アシスタント】\n{content}")
+
+    return "\n\n---\n\n".join(lines)
+
+
 # ========== Dashboard Handlers ==========
 
 def get_dashboard_data():
@@ -109,60 +155,76 @@ def get_dashboard_data():
     stats = engine.get_stats()
     threshold = engine.check_dream_threshold()
 
-    # Format stats
-    stats_text = f"""### 📦 記憶 (ChromaDB)
+    stats_text = f"""### 📊 蓄積データ
 
-| 種別 | 件数 | 備考 |
-|---|---|---|
-| LLM自発メモリ | {stats['llm_memory_count']} | MCP経由で保存 |
-| 気づき | {stats['insight_count']} | 蒸留対象 |
-| 夢見インサイト | {stats['dream_insight_count']} | 蒸留対象 |
-| **合計** | **{stats['total_chromadb']}** | |
+| 項目 | 件数 |
+|------|------|
+| 📦 記憶（ChromaDB） | {stats['total_chromadb']} |
+| 💬 フィードバック | {stats['feedback_count']} |
 
-### 💬 フィードバック: {stats['feedback_count']}件
-### 🌙 夢見: {stats['dream_cycles']}回
+### 🌙 夢見
 
----
-- 蒸留閾値: **{threshold['current_count']}** / **{threshold['threshold']}**
-- 夢見推奨: {'**はい** ✨' if threshold['should_dream'] else 'いいえ'}
+| 項目 | 値 |
+|------|-----|
+| 実行回数 | {stats['dream_cycles']}回 |
+| 最終実行 | {stats.get('last_dream', '未実行')} |
+| 推奨 | {'✨ はい' if threshold['should_dream'] else 'いいえ'} |
 """
 
-    # Format insights
-    insights = engine.memory.get_insights(limit=10)
-    if insights:
-        insight_lines = ["### 最新のインサイト\n"]
-        for entry in reversed(insights):
-            insight = entry.get("insight", "")
-            source = entry.get("source", "")
-            insight_lines.append(f"- [{source}] {insight}")
-        insights_text = "\n".join(insight_lines)
-    else:
-        insights_text = "インサイトはまだありません"
-
-    return stats_text, insights_text
+    return stats_text
 
 
-def trigger_dream():
-    """Trigger dreaming cycle"""
+def get_dream_data():
+    """Get all memories and feedback for dream tab selection"""
+    export = engine.memory.export_for_dreaming()
+    memories = export.get("memories", [])
+    feedbacks = export.get("feedback", [])
+
+    # 記憶一覧をチェックボックス用に整形
+    # content は既に [カテゴリ] 内容 形式で保存されているのでそのまま使用
+    memory_choices = []
+    for mem in memories:
+        content = mem.get("content", "")[:120]  # 表示用に120文字まで
+        mem_id = mem.get("id", "")
+        memory_choices.append((content, mem_id))
+
+    # フィードバック一覧
+    feedback_choices = []
+    for i, fb in enumerate(feedbacks):
+        text = fb.get("feedback", "")[:100]
+        feedback_choices.append((text, str(i)))
+
+    return memory_choices, feedback_choices
+
+
+def trigger_dream_with_selection(selected_memory_ids: list, selected_feedback_ids: list):
+    """Trigger dreaming cycle with selected memories and feedback"""
+    # TODO: 選択的な夢見を実装（現在は全記憶で実行）
     result = engine.trigger_dream()
 
     if result["status"] == "completed":
-        insights_text = "\n".join([f"- {ins}" for ins in result.get("insights", [])])
+        generated_memories = "\n".join([f"- {ins}" for ins in result.get("insights", [])])
         return f"""### 🌙 夢見完了！
 
-- 処理した記憶: {result.get('memories_processed', 0)}
-- 削除した記憶: {result.get('memories_deleted', 0)}
-- 使用したフィードバック: {result.get('feedbacks_used', 0)}
-- 生成したインサイト: {result.get('insights_generated', 0)}
-- 処理時間: {result.get('duration_seconds', 0):.1f}秒
+**【夢見入力】**
+- 使用した記憶: {result.get('memories_processed', 0)}件 → アーカイブに移動
+- ユーザーフィードバック: {result.get('feedbacks_used', 0)}件
+- 前回の夢見で生成した記憶: {result.get('previous_insights_used', 0)}件
 
-### 生成されたインサイト
-{insights_text}
+**【生成された記憶】**（ChromaDBに保存済み）
+{generated_memories}
+
+処理時間: {result.get('duration_seconds', 0):.1f}秒
 """
     elif result["status"] == "skipped":
         return f"⏭️ スキップ: {result.get('reason', '')}"
     else:
         return f"❌ 失敗: {result.get('reason', '')}"
+
+
+def trigger_dream():
+    """Trigger dreaming cycle (legacy - all memories)"""
+    return trigger_dream_with_selection([], [])
 
 
 def reset_memory():
@@ -176,6 +238,27 @@ def reset_memory():
 - 思考ログ: {result.get('thought_logs_deleted', 0)}件 削除
 
 記憶が初期化されました。"""
+
+
+def reset_everything():
+    """Reset ALL data including archives and logs"""
+    result = engine.reset_everything()
+    return f"""### ⚠️ 完全リセット完了
+
+**記憶データ:**
+- ChromaDB: {result.get('chromadb_deleted', 0)}件 削除
+- インサイト: {result.get('insights_deleted', 0)}件 削除
+- フィードバック: {result.get('feedback_deleted', 0)}件 削除
+- 思考ログ: {result.get('thought_logs_deleted', 0)}件 削除
+
+**アーカイブ・ログ:**
+- 記憶アーカイブ: {result.get('memory_archive_deleted', 0)}件 削除
+- 夢見アーカイブ: {result.get('dream_archives_deleted', 0)}件 削除
+- インサイトアーカイブ: {result.get('insights_archived_deleted', 0)}件 削除
+- フィードバックアーカイブ: {result.get('feedback_archived_deleted', 0)}件 削除
+- LoRAデータ: {result.get('lora_dataset_deleted', 0)}件 削除
+
+全てのデータが完全に削除されました。"""
 
 
 # ========== Settings Handlers ==========
@@ -223,7 +306,12 @@ def create_app():
         title="LLM Awareness Engine",
     ) as app:
 
-        gr.Markdown("# 🧠 LLM Awareness Engine")
+        with gr.Row():
+            with gr.Column(scale=9):
+                gr.Markdown("# 🧠 LLM Awareness Engine")
+            with gr.Column(scale=1):
+                shutdown_btn = gr.Button("🛑 終了", variant="stop", size="sm")
+
         gr.Markdown("*気づきは命じるものではなく、創発するもの*")
 
         with gr.Tabs():
@@ -247,6 +335,7 @@ def create_app():
 
                         with gr.Row():
                             clear_btn = gr.Button("🗑️ 会話クリア")
+                            copy_chat_btn = gr.Button("📋 全体コピー")
 
                     with gr.Column(scale=2):
                         insight_display = gr.Markdown(
@@ -266,76 +355,257 @@ def create_app():
                             interactive=False,
                         )
 
-                # Chat events
+                # Chat events (time_limit=600 for long LLM responses)
                 send_btn.click(
                     send_message,
                     inputs=[msg_input, chatbot],
                     outputs=[chatbot, msg_input, insight_display],
+                    time_limit=600,
                 )
                 msg_input.submit(
                     send_message,
                     inputs=[msg_input, chatbot],
                     outputs=[chatbot, msg_input, insight_display],
+                    time_limit=600,
                 )
                 clear_btn.click(
                     clear_chat,
                     outputs=[chatbot, msg_input, insight_display],
                 )
+
+                # Hidden textbox to hold formatted chat for copying
+                copy_text = gr.Textbox(visible=False)
+
+                copy_chat_btn.click(
+                    format_chat_for_copy,
+                    inputs=[chatbot],
+                    outputs=[copy_text],
+                ).then(
+                    None,
+                    inputs=[copy_text],
+                    js="(text) => { navigator.clipboard.writeText(text); }",
+                )
+
                 feedback_btn.click(
                     submit_feedback,
                     inputs=[feedback_input],
                     outputs=[feedback_status, feedback_input],
                 )
 
-            # ========== Tab 2: Dashboard ==========
+            # ========== Tab 2: Dashboard (統計のみ) ==========
             with gr.TabItem("📊 ダッシュボード"):
                 with gr.Row():
                     refresh_btn = gr.Button("🔄 更新")
 
-                with gr.Row():
-                    with gr.Column():
-                        stats_display = gr.Markdown(label="統計")
-                    with gr.Column():
-                        insights_display = gr.Markdown(label="インサイト")
-
-                gr.Markdown("---")
-                gr.Markdown("### 🌙 夢見モード")
-                dream_btn = gr.Button(
-                    "🌙 今すぐ夢見を実行",
-                    variant="primary",
-                    elem_classes=["dream-button"],
-                )
-                dream_result = gr.Markdown(label="夢見結果")
-
-                gr.Markdown("---")
-                gr.Markdown("### 🗑️ 記憶リセット")
-                reset_btn = gr.Button(
-                    "🗑️ 全記憶を消去",
-                    variant="stop",
-                )
-                reset_result = gr.Markdown(label="リセット結果")
+                stats_display = gr.Markdown(label="統計")
 
                 # Dashboard events
                 refresh_btn.click(
                     get_dashboard_data,
-                    outputs=[stats_display, insights_display],
+                    outputs=[stats_display],
                 )
+
+            # ========== Tab 3: Dream (記憶選択 + 夢見実行) ==========
+            with gr.TabItem("🌙 夢見"):
+                with gr.Row():
+                    refresh_dream_btn = gr.Button("🔄 一覧を更新")
+                    dream_btn = gr.Button(
+                        "🌙 夢見を実行",
+                        variant="primary",
+                        elem_classes=["dream-button"],
+                    )
+                    delete_selected_btn = gr.Button(
+                        "🗑️ 選択した記憶を削除",
+                        variant="stop",
+                    )
+
+                dream_result = gr.Markdown(label="結果")
+
+                gr.Markdown("---")
+                gr.Markdown("### 📦 ChromaDB記憶一覧")
+                with gr.Row():
+                    select_all_btn = gr.Button("☑️ 全選択", size="sm")
+                    deselect_all_btn = gr.Button("☐ 全解除", size="sm")
+
+                memory_checkboxes = gr.CheckboxGroup(
+                    choices=[],
+                    label="記憶一覧",
+                    value=[],
+                )
+
+                gr.Markdown("---")
+                gr.Markdown("### 💬 ユーザーフィードバック一覧")
+
+                feedback_checkboxes = gr.CheckboxGroup(
+                    choices=[],
+                    label="フィードバック一覧",
+                    value=[],
+                )
+
+                # ========== アーカイブセクション ==========
+                gr.Markdown("---")
+                gr.Markdown("### 📁 アーカイブ（夢見で使用済みの記憶）")
+                gr.Markdown("*夢見処理で統合された記憶がここに保存されています。必要に応じて復元できます。*")
+
+                with gr.Row():
+                    refresh_archive_btn = gr.Button("🔄 更新", size="sm")
+                    select_all_archive_btn = gr.Button("☑️ 全選択", size="sm")
+                    deselect_all_archive_btn = gr.Button("☐ 全解除", size="sm")
+                    restore_btn = gr.Button("♻️ 選択を復元", variant="primary", size="sm")
+                    delete_archive_btn = gr.Button("🗑️ 完全に削除", variant="stop", size="sm")
+
+                archive_status = gr.Markdown("")
+
+                archive_checkboxes = gr.CheckboxGroup(
+                    choices=[],
+                    label="アーカイブ一覧",
+                    value=[],
+                )
+
+                # Dream tab events
+                def refresh_dream_lists():
+                    memory_choices, feedback_choices = get_dream_data()
+                    # 全選択状態で返す
+                    memory_values = [m[1] for m in memory_choices]
+                    feedback_values = [f[1] for f in feedback_choices]
+                    return (
+                        gr.update(choices=memory_choices, value=memory_values),
+                        gr.update(choices=feedback_choices, value=feedback_values),
+                    )
+
+                def show_processing():
+                    return "### ⏳ 夢見処理中...\n\n*MCPツールを使って記憶を統合しています。しばらくお待ちください...*"
+
+                def delete_selected_memories(selected_ids):
+                    if not selected_ids:
+                        return "⚠️ 削除する記憶を選択してください"
+                    result = engine.memory.batch_delete(selected_ids)
+                    return f"✅ {result['deleted_count']}件の記憶を削除しました"
+
+                # 全選択/全解除関数
+                def select_all_memories():
+                    memory_choices, _ = get_dream_data()
+                    all_ids = [m[1] for m in memory_choices]
+                    return gr.update(value=all_ids)
+
+                def deselect_all_memories():
+                    return gr.update(value=[])
+
+                # アーカイブ用関数
+                def get_archive_data():
+                    """アーカイブから記憶一覧を取得"""
+                    archived = engine.memory.get_archived_memories()
+                    choices = []
+                    for i, entry in enumerate(archived):
+                        content = entry.get("content", "")[:80]
+                        archived_at = entry.get("archived_at", "")[:10]
+                        choices.append((f"[{archived_at}] {content}", str(i)))
+                    return gr.update(choices=choices, value=[])
+
+                def select_all_archive():
+                    """アーカイブ全選択"""
+                    archived = engine.memory.get_archived_memories()
+                    all_ids = [str(i) for i in range(len(archived))]
+                    return gr.update(value=all_ids)
+
+                def deselect_all_archive():
+                    """アーカイブ全解除"""
+                    return gr.update(value=[])
+
+                def restore_selected_archive(selected_indices):
+                    """選択したアーカイブを復元"""
+                    if not selected_indices:
+                        return "⚠️ 復元する記憶を選択してください"
+                    indices = [int(i) for i in selected_indices]
+                    result = engine.memory.restore_memories(indices)
+                    return f"✅ {result['restored_count']}件の記憶を復元しました"
+
+                def delete_selected_archive(selected_indices):
+                    """選択したアーカイブを完全削除"""
+                    if not selected_indices:
+                        return "⚠️ 削除する記憶を選択してください"
+                    indices = [int(i) for i in selected_indices]
+                    result = engine.memory.delete_archived_memories(indices)
+                    return f"✅ {result['deleted_count']}件の記憶を完全に削除しました"
+
+                refresh_dream_btn.click(
+                    refresh_dream_lists,
+                    outputs=[memory_checkboxes, feedback_checkboxes],
+                )
+                # 全選択/全解除ボタン
+                select_all_btn.click(
+                    select_all_memories,
+                    outputs=[memory_checkboxes],
+                )
+                deselect_all_btn.click(
+                    deselect_all_memories,
+                    outputs=[memory_checkboxes],
+                )
+                # 夢見ボタン: まず「処理中」を表示してから実行
                 dream_btn.click(
-                    trigger_dream,
+                    show_processing,
                     outputs=[dream_result],
+                ).then(
+                    trigger_dream_with_selection,
+                    inputs=[memory_checkboxes, feedback_checkboxes],
+                    outputs=[dream_result],
+                ).then(
+                    refresh_dream_lists,
+                    outputs=[memory_checkboxes, feedback_checkboxes],
+                ).then(
+                    get_archive_data,
+                    outputs=[archive_checkboxes],
                 )
-                reset_btn.click(
-                    reset_memory,
-                    outputs=[reset_result],
+                # 削除ボタン
+                delete_selected_btn.click(
+                    delete_selected_memories,
+                    inputs=[memory_checkboxes],
+                    outputs=[dream_result],
+                ).then(
+                    refresh_dream_lists,
+                    outputs=[memory_checkboxes, feedback_checkboxes],
+                )
+
+                # アーカイブ操作
+                refresh_archive_btn.click(
+                    get_archive_data,
+                    outputs=[archive_checkboxes],
+                )
+                select_all_archive_btn.click(
+                    select_all_archive,
+                    outputs=[archive_checkboxes],
+                )
+                deselect_all_archive_btn.click(
+                    deselect_all_archive,
+                    outputs=[archive_checkboxes],
+                )
+                restore_btn.click(
+                    restore_selected_archive,
+                    inputs=[archive_checkboxes],
+                    outputs=[archive_status],
+                ).then(
+                    get_archive_data,
+                    outputs=[archive_checkboxes],
+                ).then(
+                    refresh_dream_lists,
+                    outputs=[memory_checkboxes, feedback_checkboxes],
+                )
+                delete_archive_btn.click(
+                    delete_selected_archive,
+                    inputs=[archive_checkboxes],
+                    outputs=[archive_status],
+                ).then(
+                    get_archive_data,
+                    outputs=[archive_checkboxes],
                 )
 
                 # Auto-refresh on tab load
                 app.load(
                     get_dashboard_data,
-                    outputs=[stats_display, insights_display],
+                    outputs=[stats_display],
                 )
 
-            # ========== Tab 3: Settings ==========
+            # ========== Tab 4: Settings ==========
             with gr.TabItem("⚙️ 設定"):
                 gr.Markdown("### LM Studio 接続設定")
 
@@ -360,6 +630,32 @@ def create_app():
                 conn_status = gr.Textbox(label="接続状態", interactive=False)
 
                 gr.Markdown("---")
+                gr.Markdown("### 🗑️ データリセット")
+
+                gr.Markdown("**通常リセット**: 記憶、フィードバック、思考ログを削除（アーカイブは保持）")
+                reset_btn = gr.Button(
+                    "🗑️ 記憶を消去",
+                    variant="stop",
+                )
+
+                gr.Markdown("**完全リセット**: 全データ（記憶 + アーカイブ + ログ全て）を完全削除")
+                reset_all_btn = gr.Button(
+                    "⚠️ 全データを完全消去",
+                    variant="stop",
+                )
+
+                reset_result = gr.Markdown(label="リセット結果")
+
+                reset_btn.click(
+                    reset_memory,
+                    outputs=[reset_result],
+                )
+                reset_all_btn.click(
+                    reset_everything,
+                    outputs=[reset_result],
+                )
+
+                gr.Markdown("---")
                 gr.Markdown("### 夢見設定")
 
                 dream_threshold_input = gr.Number(
@@ -381,6 +677,21 @@ def create_app():
                     inputs=[host_input, port_input, api_token_input, dream_threshold_input],
                     outputs=[save_status],
                 )
+
+        # ========== Global: Shutdown Button ==========
+        def shutdown_server():
+            """Gradioサーバーを停止してポートを解放"""
+            import os
+            os._exit(0)
+
+        shutdown_btn.click(
+            shutdown_server,
+            inputs=[],
+            outputs=[],
+        )
+
+    # Enable queue with longer timeout for LLM responses
+    app.queue(default_concurrency_limit=1)
 
     return app
 

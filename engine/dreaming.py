@@ -41,13 +41,11 @@ DREAM_PROMPT = """あなたは自分の記憶を整理し、学びを抽出す�
 
 ---
 
-毎回必ず上記を統合し、記憶すべき重要な概念、気づき、知識、情報、本質を抽出する事。
+上記を統合し、記憶すべき重要な概念、気づき、知識、情報、本質を抽出せよ。
 前回の気づきが今も有効なら引き継ぎ、新しい経験で更新・統合せよ。不要になった気づきは捨てよ。
 
-それらをリスト化して、後から検索しやすいように適切なカテゴリータグを付ける事。
-
-【出力形式】
-[カテゴリ] 内容
+抽出した記憶は、後から検索しやすいような構造の文章でリスト化せよ。
+各項目は1行で、先頭に「- 」を付けること。
 """
 
 
@@ -66,7 +64,6 @@ class DreamingEngine:
 
         # Files
         self.archives_file = self.data_dir / "dream_archives.jsonl"
-        self.lora_dataset_file = self.data_dir / "lora_dream_dataset.jsonl"
 
     # ========== Main Dream Method ==========
 
@@ -140,18 +137,16 @@ class DreamingEngine:
 
 毎回必ず以下の順序で処理する事：
 
-1. search_memory で過去の記憶を検索し、関連する情報を確認する
+1. 与えられた記憶を読み込み、内容を把握する
 2. sequentialthinking を使い、思考を多角的に観察し、可能性を思索し、熟考しまとめ、見直す
-3. 重要な気づきは save_memory で保存する。カテゴリを設定し情報と関連づけて保存する事
-4. 思考が完了したら最終出力を生成する事
+3. 思考が完了したら最終出力を生成する
 
-【出力形式】
-[カテゴリ] 内容
+出力は後から検索しやすい自然な文章で。各項目は「- 」で始める1行の箇条書き。
 """
         response, _ = self.lm_client.chat(
             input_text=prompt,
             system_prompt=dream_system_prompt,
-            integrations=["mcp/sequential-thinking", "mcp/memory"],
+            integrations=["mcp/sequential-thinking"],
             temperature=0.7,
         )
 
@@ -159,31 +154,31 @@ class DreamingEngine:
             logger.error(f"Dream LLM call failed: {response}")
             return {"status": "failed", "reason": f"LLM error: {response[:100]}"}
 
-        # Step 7: Parse [カテゴリ] 内容 insights
-        parsed_insights = self._parse_categorized_insights(response)
+        # Step 7: Parse insights (no categories - semantic search handles it)
+        parsed_insights = self._parse_insights(response)
         if not parsed_insights:
-            # フォールバック: パースできなければ全文を insight として保存
-            parsed_insights = [("insight", response.strip()[:500])]
-            logger.info("No categorized insights found, saving full response as insight")
+            # フォールバック: パースできなければ全文を保存
+            parsed_insights = [response.strip()[:500]]
+            logger.info("No list items found, saving full response")
         else:
-            logger.info(f"Extracted {len(parsed_insights)} categorized insights")
+            logger.info(f"Extracted {len(parsed_insights)} insights")
 
         # Step 8: Archive and save
         timestamp = datetime.now().isoformat()
 
-        # Archive old insights and save new ones to JSONL
+        # Archive insights to JSONL
         new_insight_entries = [
-            {"timestamp": timestamp, "category": cat, "insight": content, "source": "dreaming"}
-            for cat, content in parsed_insights
+            {"timestamp": timestamp, "insight": content, "source": "dreaming"}
+            for content in parsed_insights
         ]
         self.memory.archive_insights(new_insight_entries)
 
-        # Save dream insights to ChromaDB (LLMが付けたカテゴリで保存)
-        for category, content in parsed_insights:
+        # Save dream insights to ChromaDB (category="dream" for all dream-generated memories)
+        for content in parsed_insights:
             try:
                 self.memory.save(
                     content=content,
-                    category=category,  # LLMが付けたカテゴリ（未知なら voluntary にフォールバック）
+                    category="dream",  # 夢見由来の記憶
                     metadata={"source": "dreaming"}
                 )
             except Exception as e:
@@ -192,48 +187,51 @@ class DreamingEngine:
         # Archive feedback
         feedbacks_archived = self.memory.archive_feedback()
 
-        # Delete processed memories from ChromaDB (voluntary is kept as permanent dictionary)
-        memory_ids = [m["id"] for m in memories if m.get("category") != "voluntary"]
-        deleted = self.memory.batch_delete(memory_ids) if memory_ids else {"deleted_count": 0}
+        # 使用した記憶をアーカイブに移動（ChromaDBから削除）
+        used_memory_ids = [mem["id"] for mem in memories if "id" in mem]
+        archive_result = self.memory.archive_memories(used_memory_ids)
 
         # Save dream archive
-        insights_for_archive = [f"[{cat}] {content}" for cat, content in parsed_insights]
         archive_entry = {
             "archived_at": timestamp,
             "memories_processed": len(memories),
+            "memories_archived": archive_result.get("archived_count", 0),
             "feedbacks_used": len(feedbacks),
             "previous_insights_used": len(prev_insights),
-            "insights_generated": insights_for_archive,
+            "insights_generated": parsed_insights,
         }
         self._append_jsonl(self.archives_file, archive_entry)
-
-        # Save LoRA training data
-        self._save_lora_data(prompt, insights_for_archive, timestamp)
 
         duration = (datetime.now() - start_time).total_seconds()
 
         logger.info(f"=== Dream Complete: {len(parsed_insights)} insights, "
-                     f"deleted={deleted.get('deleted_count', 0)}, "
+                     f"archived={archive_result.get('archived_count', 0)}, "
                      f"feedback_archived={feedbacks_archived}, "
                      f"{duration:.1f}s ===")
 
         return {
             "status": "completed",
             "memories_processed": len(memories),
-            "memories_deleted": deleted.get("deleted_count", 0),
+            "memories_archived": archive_result.get("archived_count", 0),
             "feedbacks_used": len(feedbacks),
             "feedbacks_archived": feedbacks_archived,
             "insights_generated": len(parsed_insights),
-            "insights": insights_for_archive,
+            "insights": parsed_insights,
             "duration_seconds": duration,
+            "previous_insights_used": len(prev_insights),
         }
 
     # ========== Insight Parser ==========
 
-    def _parse_categorized_insights(self, response: str) -> list[tuple[str, str]]:
+    def _parse_insights(self, response: str) -> list[str]:
         """
-        Parse [カテゴリ] 内容 formatted insights from LLM response.
-        Returns list of (category, content) tuples.
+        Parse insights from LLM response.
+        Returns list of content strings (no categories - semantic search handles it).
+
+        Accepts:
+        - Lines starting with "- " (bullet points)
+        - Lines starting with "・" (Japanese bullet)
+        - Lines starting with numbers like "1. " or "1) "
         """
         insights = []
         for line in response.strip().split("\n"):
@@ -241,32 +239,24 @@ class DreamingEngine:
             if not line or len(line) < 5:
                 continue
 
-            # Match: [カテゴリ] 内容
-            if line.startswith("[") and "]" in line:
-                bracket_end = line.index("]")
-                category = line[1:bracket_end].strip()
-                content = line[bracket_end + 1:].strip()
-                if category and content:
-                    insights.append((category, content))
+            # Remove bullet point prefixes
+            if line.startswith("- "):
+                content = line[2:].strip()
+            elif line.startswith("・"):
+                content = line[1:].strip()
+            elif len(line) > 2 and line[0].isdigit() and line[1] in ".)" :
+                content = line[2:].strip()
+            elif len(line) > 3 and line[0].isdigit() and line[1].isdigit() and line[2] in ".)":
+                content = line[3:].strip()
+            else:
+                # Skip lines that don't look like list items
+                continue
+
+            if content and len(content) >= 5:
+                insights.append(content)
 
         return insights
 
-    # ========== LoRA Dataset ==========
-
-    def _save_lora_data(self, prompt: str, insights: list[str], timestamp: str):
-        """Save dream input/output as LoRA fine-tuning dataset"""
-        try:
-            entry = {
-                "instruction": "以下の情報を読み、気づきをA(修正すべき行動)/B(強化すべき傾向)/C(新しい理解)に分類してまとめよ。",
-                "input": prompt,
-                "output": "\n".join(insights),
-                "system": "あなたは自分の記憶を整理し、学びを抽出するAIです。",
-                "timestamp": timestamp,
-            }
-            self._append_jsonl(self.lora_dataset_file, entry)
-            logger.info(f"LoRA training data saved: {len(insights)} insights")
-        except Exception as e:
-            logger.error(f"Failed to save LoRA data: {e}")
 
     # ========== Stats ==========
 

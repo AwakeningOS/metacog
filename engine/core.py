@@ -114,12 +114,12 @@ class AwarenessEngine:
             except Exception as e:
                 logger.error(f"Failed to save insight: {e}")
 
-        # 7. Save voluntary memories
+        # 7. Save chat memories
         for save_item in parsed["saves"]:
             try:
-                self.memory.save(save_item, category="voluntary")
+                self.memory.save(save_item, category="chat")
             except Exception as e:
-                logger.error(f"Failed to save voluntary memory: {e}")
+                logger.error(f"Failed to save chat memory: {e}")
 
         # 8. Update conversation history
         self.conversation_history.append({"role": "user", "content": user_input})
@@ -140,6 +140,7 @@ class AwarenessEngine:
             "insights": parsed["insights"],
             "saves": parsed["saves"],
             "tool_calls": api_metadata.get("tool_calls", []),
+            "thoughts": api_metadata.get("thoughts", []),
             "model": api_metadata.get("model", ""),
         }
 
@@ -196,6 +197,10 @@ class AwarenessEngine:
         """Reset all memories (ChromaDB + JSONL files)"""
         return self.memory.reset_all()
 
+    def reset_everything(self) -> dict:
+        """Reset all memories AND all logs/archives"""
+        return self.memory.reset_everything()
+
     # ========== State Management ==========
 
     def clear_conversation(self):
@@ -208,10 +213,8 @@ class AwarenessEngine:
 
     def get_stats(self) -> dict:
         """Get system statistics"""
-        # LLM自発メモリ = MCP経由で保存されたもの全て
-        llm_memory_count = self.memory.get_llm_memory_count()
-        insight_count_chromadb = self.memory.count(category="insight")
-        dream_insight_count = self.memory.count(category="dream_insight")
+        chat_memory_count = self.memory.count(category="chat")
+        dream_memory_count = self.memory.count(category="dream")
         total_chromadb = self.memory.count()
 
         feedback_count = len(self.memory.get_feedback())
@@ -224,9 +227,8 @@ class AwarenessEngine:
 
         return {
             "total_chromadb": total_chromadb,
-            "llm_memory_count": llm_memory_count,
-            "insight_count": insight_count_chromadb,
-            "dream_insight_count": dream_insight_count,
+            "chat_memory_count": chat_memory_count,
+            "dream_memory_count": dream_memory_count,
             "feedback_count": feedback_count,
             "conversation_turns": len(self.conversation_history) // 2,
             "dream_cycles": dream_stats.get("dream_cycles", 0),
