@@ -200,6 +200,10 @@ class AwarenessEngine:
         """Get currently loaded model"""
         return self.lm_client.get_loaded_model() or ""
 
+    def get_model_info(self, model_key: str) -> dict:
+        """Get model info including max_context_length"""
+        return self.lm_client.get_model_info(model_key)
+
     # ========== Memory Reset ==========
 
     def reset_memory(self) -> dict:

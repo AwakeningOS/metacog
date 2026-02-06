@@ -349,6 +349,27 @@ def refresh_models():
         return gr.update(choices=["(接続エラー)"])
 
 
+def update_context_slider_max(selected_model: str):
+    """Update context length slider maximum based on selected model"""
+    try:
+        if not selected_model or selected_model in ["(モデルなし)", "(接続エラー)"]:
+            return gr.update()
+
+        model_info = engine.get_model_info(selected_model)
+        max_ctx = model_info.get("max_context_length", 32000)
+        logger.info(f"Model {selected_model}: max_context_length={max_ctx}")
+
+        # Get current value from config
+        current_value = config.get("lm_studio", {}).get("context_length", 32000)
+        # Clamp current value to new maximum
+        new_value = min(current_value, max_ctx)
+
+        return gr.update(maximum=max_ctx, value=new_value)
+    except Exception as e:
+        logger.error(f"update_context_slider_max error: {e}")
+        return gr.update()
+
+
 def save_prompts(system_prompt, dream_prompt, selected_model):
     """Save system prompts and model selection"""
     updates = {
@@ -843,14 +864,24 @@ def create_app():
                         gr.Markdown("---")
                         gr.Markdown("### コンテキスト長")
 
+                        # 選択中モデルのmax_context_lengthを取得
+                        initial_model = config.get("selected_model") or current_model
+                        initial_max_ctx = 131072  # fallback
+                        if initial_model and initial_model not in ["(モデルなし)", "(接続エラー)"]:
+                            try:
+                                model_info = engine.get_model_info(initial_model)
+                                initial_max_ctx = model_info.get("max_context_length", 131072)
+                            except Exception:
+                                pass
+
                         context_length_slider = gr.Slider(
                             minimum=4096,
-                            maximum=131072,
+                            maximum=initial_max_ctx,
                             step=1024,
-                            value=config.get("lm_studio", {}).get("context_length", 32000),
+                            value=min(config.get("lm_studio", {}).get("context_length", 32000), initial_max_ctx),
                             label="コンテキスト長（トークン数）",
                         )
-                        gr.Markdown("*モデルの最大コンテキスト長以下に設定してください。長いほどVRAM使用量が増加します。*")
+                        gr.Markdown("*モデル変更時に最大値が自動調整されます。長いほどVRAM使用量が増加します。*")
 
                         gr.Markdown("---")
                         gr.Markdown("### 夢見設定")
@@ -872,6 +903,12 @@ def create_app():
                         refresh_models_btn.click(
                             refresh_models,
                             outputs=[model_dropdown],
+                        )
+                        # モデル選択時にスライダーの最大値を更新
+                        model_dropdown.change(
+                            update_context_slider_max,
+                            inputs=[model_dropdown],
+                            outputs=[context_length_slider],
                         )
                         save_btn.click(
                             save_settings,

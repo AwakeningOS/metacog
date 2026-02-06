@@ -110,6 +110,29 @@ class LMStudioClient:
             pass
         return []
 
+    def get_model_info(self, model_key: str) -> dict:
+        """Get detailed info for a specific model including max_context_length"""
+        try:
+            response = requests.get(
+                self.models_url,
+                headers=self._get_headers(),
+                timeout=5,
+            )
+
+            if response.status_code == 200:
+                models = response.json().get("models", [])
+                for model in models:
+                    if model.get("key") == model_key:
+                        return {
+                            "key": model.get("key", ""),
+                            "max_context_length": model.get("max_context_length", 32000),
+                            "architecture": model.get("architecture", ""),
+                            "size": model.get("size", 0),
+                        }
+        except Exception as e:
+            logger.warning(f"Failed to get model info: {e}")
+        return {"max_context_length": 32000}  # fallback
+
     # ========== Chat ==========
 
     def chat(
