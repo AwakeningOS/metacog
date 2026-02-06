@@ -6,16 +6,19 @@ echo ========================================
 echo   Metacog - LLM Awareness Engine
 echo ========================================
 echo.
-echo 起動中... ブラウザが自動で開きます。
-echo 終了するには、UIの「終了」ボタンを押すか、
-echo このウィンドウを閉じてください。
+
+where python >nul 2>&1
+if errorlevel 1 (
+    echo [ERROR] Python not found.
+    pause
+    exit /b 1
+)
+
+echo Starting... Browser will open automatically.
 echo.
 
 python metacog.py
 
-if errorlevel 1 (
-    echo.
-    echo [ERROR] 起動に失敗しました。
-    echo install.bat を実行してください。
-    pause
-)
+echo.
+echo Finished.
+pause
