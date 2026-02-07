@@ -148,14 +148,22 @@ class AwarenessEngine:
         return parsed["response"], metadata
 
     def _build_input_with_context(self, user_input: str) -> str:
-        """Build input text.
+        """Build input text with previous insights for continuity.
 
-        Memory search is now handled by LLM via MCP tools (search_memory).
-        No automatic injection - LLM decides when to search.
+        - Injects previous turn's insights to maintain thought continuity
+        - Memory search is handled by LLM via MCP tools (search_memory)
         """
-        # Simply return user input as-is
-        # LLM will use search_memory tool when needed
-        return user_input
+        parts = []
+
+        # Add previous insights if available
+        if self.last_insights:
+            insights_text = "\n".join(f"- {ins}" for ins in self.last_insights)
+            parts.append(f"[前回の気づき]\n{insights_text}")
+
+        # Add user input
+        parts.append(user_input)
+
+        return "\n\n".join(parts)
 
     # ========== Feedback ==========
 
