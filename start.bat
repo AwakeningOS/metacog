@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-cd /d "%~dp0"
+pushd "%~dp0"
 
 echo ========================================
 echo   Metacog - LLM Awareness Engine
@@ -21,4 +21,5 @@ python metacog.py
 
 echo.
 echo Finished.
+popd
 pause

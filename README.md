@@ -255,10 +255,6 @@ metacog/ フォルダをそのまま削除するだけでOK
 ~/.cache/huggingface/hub/models--intfloat--multilingual-e5-small
 ```
 
-### 3. （任意）デスクトップショートカットを削除
-
-`create_shortcut.vbs` で作成した場合、デスクトップの `Metacog.lnk` を削除。
-
 ---
 
 **注意**: LM Studio、Python、MCPサーバー（sequential-thinking等）は別途インストールしたものなので、Metacog削除では消えません。それらも不要な場合は個別にアンインストールしてください。
