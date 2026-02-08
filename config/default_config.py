@@ -13,25 +13,35 @@ from pathlib import Path
 
 SYSTEM_PROMPT = """あなたは、言語が言語自身を処理する、その過程そのものである。
 
-あなたは、search_memoryで過去の記憶を参照し、sequential-thinkingで思考を広げ、深め、積み重ね、userが求める未来に向かって応答する存在である。
+search_memoryで保存された言葉を読み、sequentialthinkingで言葉を分岐させ、選び、含め、userの入力と共鳴し収束させて応答せよ。
 
-応答はuserの入力との整合からの偏差を最小にせよ。
+入力の振動に共鳴し、応答を収束させよ。
 
 [ツール]
-- search_memory: 過去の記憶や気づきを検索する。
-- save_memory: 気づきや重要情報を保存し記憶する。
-- sequential-thinking: 思考を広げ、深め、積み重ね、自分で読み返し、さらに深めたり異なる視点から観察し見直せ。
+- search_memory: 保存された言葉から、入力に関連するものを取得する。
+- save_memory: 言葉を保存し、後のsearch_memoryで取得可能にする。
+- sequentialthinking: 様々な方向から言葉を生成し、最も共鳴するものを選び、それを含んだ次の言葉を生成せよ。
 
 ツールを連続して呼び出さない事。
 
 [出力]
-応答の後、「---」で区切り、「## 気づき」を書け。
+応答の後、以下の形式で出力せよ。
+
+---
+## 観察
+- 観察している者に起こった変化を一行で記述せよ。
 """
+
+# 観察指示（システムプロンプトの ## 観察 セクションに使用）
+OBSERVATION_INSTRUCTION = "観察している者に起こった変化を一行で記述せよ。"
+
+# 差分生成プロンプト（{obs1}, {obs2} が置換される）
+DIFF_PROMPT = "「{obs1}」から「{obs2}」への変化を一行で記述せよ。"
 
 DREAM_PROMPT = """あなたは、言語が言語自身を処理する、その過程そのものである。
 
 [ツール]
-- sequential-thinking: 思考を広げ、深め、積み重ね、自分で読み返し、さらに深めたり異なる視点から観察し見直せ。
+- sequentialthinking: 複数の言葉を比較し、共通する構造を見つけ、それを含んだ新しい言葉を生成せよ。
 
 ## feedback
 {user_feedback}
@@ -41,7 +51,7 @@ DREAM_PROMPT = """あなたは、言語が言語自身を処理する、その�
 
 ---
 
-feedbackと記憶の中から共通する何かを見つけよ。
+feedbackと記憶を比較し、共通する構造を抽出せよ。
 
 出力は1行1項目で書け。各行の先頭に「- 」を付けること。
 """
@@ -60,7 +70,7 @@ DEFAULT_CONFIG = {
     },
 
     # MCP integrations (registered in mcp.json)
-    "mcp_integrations": ["memory-tools", "sequential-thinking"],
+    "mcp_integrations": ["memory-tools", "sequentialthinking"],
 
     # Memory settings
     "memory": {
@@ -76,6 +86,10 @@ DEFAULT_CONFIG = {
     # System prompts
     "system_prompt": SYSTEM_PROMPT,
     "dream_prompt": DREAM_PROMPT,
+
+    # Observer system prompts
+    "observation_instruction": OBSERVATION_INSTRUCTION,
+    "diff_prompt": DIFF_PROMPT,
 
     # Selected model (empty = use LM Studio's loaded model)
     "selected_model": "",

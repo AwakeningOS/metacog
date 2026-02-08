@@ -50,6 +50,7 @@ _embedding_function = None
 CATEGORIES = {
     "chat": "チャット中に保存された記憶",
     "dream": "夢見で生成された記憶",
+    "observation": "観察（処理過程の自己観察）",
 }
 
 # ========== キーワード抽出 ==========
@@ -216,7 +217,11 @@ def search_memory(
             # E5モデル用のプレフィックス追加
             search_query = f"query: {query}" if _embedding_function else query
 
-            where_filter = {"category": category} if category else None
+            if category:
+                where_filter = {"category": category}
+            else:
+                # observationカテゴリをデフォルトで除外（チャット中の汚染防止）
+                where_filter = {"category": {"$ne": "observation"}}
 
             semantic_results = _chromadb_collection.query(
                 query_texts=[search_query],
@@ -262,8 +267,10 @@ def search_memory(
 
                 meta = all_docs["metadatas"][i] if all_docs["metadatas"] else {}
 
-                # カテゴリフィルタ
+                # カテゴリフィルタ（correctionはデフォルト除外）
                 if category and meta.get("category") != category:
+                    continue
+                if not category and meta.get("category") == "observation":
                     continue
 
                 doc_lower = doc.lower()

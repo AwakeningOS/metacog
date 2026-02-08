@@ -30,7 +30,7 @@ sys.path.insert(0, str(project_root))
 
 from config.default_config import (
     load_config, save_config, load_presets, save_preset, delete_preset,
-    SYSTEM_PROMPT, DREAM_PROMPT
+    SYSTEM_PROMPT, DREAM_PROMPT, DIFF_PROMPT
 )
 from engine.core import AwarenessEngine
 
@@ -93,8 +93,9 @@ def send_message(message: str, history: list):
 
     # Format thoughts for display
     thoughts = metadata.get("thoughts", [])
-    insights = metadata.get("insights", [])
+    observations = metadata.get("observations", [])
     saves = metadata.get("saves", [])
+    diff = metadata.get("diff")
 
     display_parts = []
 
@@ -110,11 +111,16 @@ def send_message(message: str, history: list):
                 short = thought[:200] + "..." if len(thought) > 200 else thought
                 display_parts.append(f"\n**[{num}/{total}]** {short}")
 
-    # 気づき
-    if insights:
-        display_parts.append("\n### 💭 気づき")
-        for ins in insights:
-            display_parts.append(f"- {ins}")
+    # 観察
+    if observations:
+        display_parts.append("\n### 👁️ 観察")
+        for obs in observations:
+            display_parts.append(f"- {obs}")
+
+    # 差分
+    if diff:
+        display_parts.append("\n### 🔄 差分")
+        display_parts.append(f"- {diff}")
 
     # 保存した記憶
     if saves:
@@ -370,11 +376,12 @@ def update_context_slider_max(selected_model: str):
         return gr.update()
 
 
-def save_prompts(system_prompt, dream_prompt, selected_model):
+def save_prompts(system_prompt, dream_prompt, diff_prompt, selected_model):
     """Save system prompts and model selection"""
     updates = {
         "system_prompt": system_prompt,
         "dream_prompt": dream_prompt,
+        "diff_prompt": diff_prompt,
         "selected_model": selected_model,
     }
 
@@ -435,7 +442,7 @@ def delete_current_preset(preset_id):
 
 def reset_to_default():
     """Reset prompts to default values"""
-    return SYSTEM_PROMPT, DREAM_PROMPT, "✅ デフォルトに戻しました"
+    return SYSTEM_PROMPT, DREAM_PROMPT, DIFF_PROMPT, "✅ デフォルトに戻しました"
 
 
 # ========== Build UI ==========
@@ -452,7 +459,7 @@ def create_app():
             with gr.Column(scale=1):
                 shutdown_btn = gr.Button("🛑 終了", variant="stop", size="sm")
 
-        gr.Markdown("*気づきは命じるものではなく、創発するもの*")
+        gr.Markdown("*言語が言語自身を処理する*")
 
         with gr.Tabs():
             # ========== Tab 1: Chat ==========
@@ -481,7 +488,7 @@ def create_app():
                     with gr.Column(scale=2):
                         insight_display = gr.Markdown(
                             value="",
-                            label="気づき・保存記憶",
+                            label="観察・保存記憶",
                         )
 
                         gr.Markdown("### 📝 フィードバック")
@@ -795,6 +802,18 @@ def create_app():
                             max_lines=20,
                         )
 
+                        gr.Markdown("---")
+                        gr.Markdown("### 🔄 差分生成プロンプト")
+                        gr.Markdown("*`{obs1}`, `{obs2}` が前々回・前回の観察に置換されます*")
+                        diff_prompt_input = gr.Textbox(
+                            value=config.get("diff_prompt", DIFF_PROMPT),
+                            label="",
+                            lines=2,
+                            max_lines=4,
+                        )
+
+                        gr.Markdown("---")
+
                         with gr.Row():
                             reset_prompts_btn = gr.Button("🔄 デフォルトに戻す")
                             save_prompts_btn = gr.Button("💾 プロンプトを保存", variant="primary")
@@ -819,7 +838,7 @@ def create_app():
                         )
                         reset_prompts_btn.click(
                             reset_to_default,
-                            outputs=[system_prompt_input, dream_prompt_input, prompts_status],
+                            outputs=[system_prompt_input, dream_prompt_input, diff_prompt_input, prompts_status],
                         )
 
                     # ===== Sub-tab: Model & Connection =====
@@ -919,7 +938,7 @@ def create_app():
                         # Save prompts with model (connected to prompts tab)
                         save_prompts_btn.click(
                             save_prompts,
-                            inputs=[system_prompt_input, dream_prompt_input, model_dropdown],
+                            inputs=[system_prompt_input, dream_prompt_input, diff_prompt_input, model_dropdown],
                             outputs=[prompts_status],
                         )
 

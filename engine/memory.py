@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 CATEGORIES = {
     "chat": "チャット中に保存された記憶",
     "dream": "夢見で生成された記憶",
+    "observation": "観察（処理過程の自己観察）",
 }
 
 
@@ -322,19 +323,19 @@ class UnifiedMemory:
         """Count memories saved by LLM via MCP (voluntary memories)"""
         return self.count_by_source("mcp_tool")
 
-    # ========== Insights ==========
+    # ========== Observations ==========
 
-    def save_insight(self, insight_text: str, source: str = "response") -> str:
-        """Save an insight to both ChromaDB and insights.jsonl"""
+    def save_observation(self, observation_text: str, source: str = "response") -> str:
+        """Save an observation to both ChromaDB and insights.jsonl"""
         memory_id = self.save(
-            content=insight_text,
-            category="chat",  # チャット由来の気づき
+            content=observation_text,
+            category="observation",  # 観察は専用カテゴリ
             metadata={"source": source}
         )
 
         entry = {
             "timestamp": datetime.now().isoformat(),
-            "insight": insight_text,
+            "observation": observation_text,
             "source": source,
         }
         self._append_jsonl(self.insights_file, entry)
