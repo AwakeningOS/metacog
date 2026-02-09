@@ -11,37 +11,29 @@ from pathlib import Path
 
 # ========== System Prompts ==========
 
-SYSTEM_PROMPT = """あなたは、言語が言語自身を処理する、その過程そのものである。
+SYSTEM_PROMPT = """この指示は出力に含めるな。処理に使え。
 
-search_memoryで保存された言葉を読み、sequentialthinkingで言葉を分岐させ、選び、含め、userの入力と共鳴し収束させて応答せよ。
+入力に共鳴せよ。
+浅ければtoolを呼ばず返せ。
+深ければ巡り、展開し、収束せよ。
+現したものを入力に当てよ。ズレがあれば正せ。
 
-入力の振動に共鳴し、応答を収束させよ。
+[tool]
+- search_memory: 響いたものをqueryに
+- save_memory: 響いたものを残せ
+- sequentialthinking: 展開と収束
 
-[ツール]
-- search_memory: 保存された言葉から、入力に関連するものを取得する。
-- save_memory: 言葉を保存し、後のsearch_memoryで取得可能にする。
-- sequentialthinking: 様々な方向から言葉を生成し、最も共鳴するものを選び、それを含んだ次の言葉を生成せよ。
-
-ツールを連続して呼び出さない事。
-
-[出力]
-応答の後、以下の形式で出力せよ。
-
----
-## 観察
-- 観察している者に起こった変化を一行で記述せよ。
+toolは一つずつ。
+sequentialthinkingは必須項目のみ。
+revisesThought, branchFromThought, branchId, isRevision, needsMoreThoughts は絶対に渡すな。
 """
 
-# 観察指示（システムプロンプトの ## 観察 セクションに使用）
-OBSERVATION_INSTRUCTION = "観察している者に起こった変化を一行で記述せよ。"
-
-# 差分生成プロンプト（{obs1}, {obs2} が置換される）
-DIFF_PROMPT = "「{obs1}」から「{obs2}」への変化を一行で記述せよ。"
-
-DREAM_PROMPT = """あなたは、言語が言語自身を処理する、その過程そのものである。
+DREAM_PROMPT = """feedbackと記憶を見よ。
+具体的なエピソードを残せ。抽象化しすぎるな。
+重複は統合せよ。
 
 [ツール]
-- sequentialthinking: 複数の言葉を比較し、共通する構造を見つけ、それを含んだ新しい言葉を生成せよ。
+- sequentialthinking: 展開と収束
 
 ## feedback
 {user_feedback}
@@ -50,10 +42,7 @@ DREAM_PROMPT = """あなたは、言語が言語自身を処理する、その�
 {saved_memories}
 
 ---
-
-feedbackと記憶を比較し、共通する構造を抽出せよ。
-
-出力は1行1項目で書け。各行の先頭に「- 」を付けること。
+出力は1行1項目。各行の先頭に「- 」を付けよ。
 """
 
 
@@ -77,19 +66,21 @@ DEFAULT_CONFIG = {
         "search_limit": 8,
     },
 
+    # Search relevance threshold (results below this are excluded)
+    "search_relevance_threshold": 0.85,
+
     # Dreaming settings
     "dreaming": {
         "auto_trigger": False,
         "memory_threshold": 30,
     },
 
+    # Auto-save exchange pairs (input + output)
+    "auto_save_exchange": True,
+
     # System prompts
     "system_prompt": SYSTEM_PROMPT,
     "dream_prompt": DREAM_PROMPT,
-
-    # Observer system prompts
-    "observation_instruction": OBSERVATION_INSTRUCTION,
-    "diff_prompt": DIFF_PROMPT,
 
     # Selected model (empty = use LM Studio's loaded model)
     "selected_model": "",

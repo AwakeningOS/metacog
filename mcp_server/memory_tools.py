@@ -51,7 +51,26 @@ CATEGORIES = {
     "chat": "チャット中に保存された記憶",
     "dream": "夢見で生成された記憶",
     "observation": "観察（処理過程の自己観察）",
+    "exchange": "入出力ペア（自動保存）",
 }
+
+# 検索結果の閾値（これ未満は返さない）
+DEFAULT_SEARCH_RELEVANCE_THRESHOLD = 0.85
+
+
+def _load_threshold() -> float:
+    """設定ファイルから閾値を読み込む"""
+    if _data_dir is None:
+        return DEFAULT_SEARCH_RELEVANCE_THRESHOLD
+    config_path = _data_dir.parent / "config" / "user_config.json"
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            return config.get("search_relevance_threshold", DEFAULT_SEARCH_RELEVANCE_THRESHOLD)
+        except Exception:
+            pass
+    return DEFAULT_SEARCH_RELEVANCE_THRESHOLD
 
 # ========== キーワード抽出 ==========
 
@@ -306,11 +325,13 @@ def search_memory(
                         "created_at": meta.get("created_at", ""),
                     })
 
-        # === 4. 結果をソートして返却 ===
+        # === 4. 結果をソートして閾値フィルタリング ===
+        threshold = _load_threshold()
         results.sort(key=lambda x: x["relevance"], reverse=True)
+        results = [r for r in results if r.get("relevance", 0) >= threshold]
         results = results[:limit]
 
-        logger.info(f"search_memory('{query[:30]}...', category='{category}'): {len(results)} results")
+        logger.info(f"search_memory('{query[:30]}...', category='{category}'): {len(results)} results (threshold={threshold})")
         return {
             "status": "ok",
             "query": query,

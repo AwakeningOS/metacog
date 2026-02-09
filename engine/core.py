@@ -5,13 +5,8 @@ Ties together all components:
 - Memory system (ChromaDB + JSONL files)
 - System prompt builder (dynamic context injection)
 - LM Studio API client
-- Response parser (response + observations + [SAVE] extraction)
+- Response parser (response + [SAVE] extraction)
 - Dreaming engine (feedback learning loop)
-
-Two-layer observer system:
-- Layer 1: Each turn generates an observation
-- Layer 2: Auto API call compares prev/current observations → diff
-- Diff is injected into next turn's input
 """
 
 import logging
@@ -58,11 +53,6 @@ class AwarenessEngine:
         self.last_assistant_output = ""
         self.last_saves: list[str] = []
 
-        # Two-layer observer state
-        self.prev_observation: Optional[str] = None
-        self.last_observation: Optional[str] = None
-        self.last_diff: Optional[str] = None
-
         logger.info(f"AwarenessEngine initialized. data_dir={self.data_dir}")
 
     @property
@@ -85,76 +75,62 @@ class AwarenessEngine:
 
         Flow:
         1. Build system prompt
-        2. Build input with diff injection
-        3. Single LLM call
-        4. Parse response → response + observations + [SAVE]
-        5. Save to memory
-        6. Shift observations, generate diff if 2 observations exist
-        7. Return response to user
+        2. LLM call with MCP integrations
+        3. Parse response → response + [SAVE]
+        4. Save to memory
+        5. Return response to user
         """
         # 1. Build system prompt
         system_prompt = self.prompt_builder.build()
 
-        # 2. Build input with diff injection
-        full_input = self._build_input_with_context(user_input)
-
-        # 3. Get MCP integrations from config
+        # 2. Get MCP integrations from config
         integrations = self.config.get("mcp_integrations", [])
 
-        # 4. Single LLM call
+        # 3. LLM call
         raw_response, api_metadata = self.lm_client.chat(
-            input_text=full_input,
+            input_text=user_input,
             system_prompt=system_prompt,
             integrations=integrations,
             context_length=self.config.get("lm_studio", {}).get("context_length", 32000),
         )
 
-        # 5. Parse response
+        # 4. Parse response
         parsed = self.response_parser.parse(raw_response)
 
-        # 6. Save extracted observations
-        for obs in parsed["observations"]:
-            try:
-                self.memory.save_insight(obs, source="response")
-            except Exception as e:
-                logger.error(f"Failed to save observation: {e}")
-
-        # 7. Save chat memories
+        # 5. Save chat memories ([SAVE] markers)
         for save_item in parsed["saves"]:
             try:
                 self.memory.save(save_item, category="chat")
             except Exception as e:
                 logger.error(f"Failed to save chat memory: {e}")
 
-        # 8. Update conversation history
+        # 6. Auto-save input only (not output to avoid LLM copying past responses)
+        if self.config.get("auto_save_exchange", True):
+            try:
+                exchange_content = f"[対話] {user_input}"
+                self.memory.save(
+                    content=exchange_content,
+                    category="exchange",
+                    metadata={"type": "exchange_input", "source": "auto"}
+                )
+                logger.info("Auto-saved exchange input")
+            except Exception as e:
+                logger.error(f"Failed to auto-save exchange: {e}")
+
+        # 7. Update conversation history
         self.conversation_history.append({"role": "user", "content": user_input})
         self.conversation_history.append({"role": "assistant", "content": parsed["response"]})
 
         if len(self.conversation_history) > 20:
             self.conversation_history = self.conversation_history[-20:]
 
-        # 9. Shift observations and generate diff
-        new_obs = parsed["observations"][0] if parsed["observations"] else None
-        self.prev_observation = self.last_observation
-        self.last_observation = new_obs
-
-        # Generate diff if two observations exist
-        self.last_diff = None
-        if self.prev_observation and self.last_observation:
-            self.last_diff = self._generate_diff(self.prev_observation, self.last_observation)
-            if self.last_diff:
-                logger.info(f"Generated diff: {self.last_diff[:50]}")
-                print(f"DEBUG: Generated diff = {self.last_diff}")
-
-        # 10. Store last turn state
+        # 7. Store last turn state
         self.last_user_input = user_input
         self.last_assistant_output = parsed["response"]
         self.last_saves = parsed["saves"]
 
         # Build metadata
         metadata = {
-            "observations": parsed["observations"],
-            "diff": self.last_diff,
             "saves": parsed["saves"],
             "tool_calls": api_metadata.get("tool_calls", []),
             "thoughts": api_metadata.get("thoughts", []),
@@ -162,70 +138,6 @@ class AwarenessEngine:
         }
 
         return parsed["response"], metadata
-
-    def _build_input_with_context(self, user_input: str) -> str:
-        """Build input with diff injection only.
-
-        Turn 1, 2: No injection
-        Turn 3+: Inject <diff> from previous turn's auto-generated diff
-        """
-        print(f"DEBUG: prev_observation = {self.prev_observation}")
-        print(f"DEBUG: last_observation = {self.last_observation}")
-        print(f"DEBUG: last_diff = {self.last_diff}")
-
-        parts = []
-
-        # Inject diff only
-        if self.last_diff:
-            parts.append(f"<diff>{self.last_diff}</diff>")
-            logger.info(f"Injected diff: {self.last_diff[:50]}")
-
-        # Add user input
-        parts.append(user_input)
-
-        return "\n\n".join(parts)
-
-    def _generate_diff(self, obs1: str, obs2: str) -> Optional[str]:
-        """Auto API call: compare two observations and generate diff.
-
-        Uses diff_prompt from config with {obs1}, {obs2} placeholders.
-        Output: one-line diff text
-        """
-        # Get diff prompt from config (with fallback)
-        diff_template = self.config.get("diff_prompt", "「{obs1}」から「{obs2}」への変化を一行で記述せよ。")
-        prompt = diff_template.format(obs1=obs1, obs2=obs2)
-
-        try:
-            logger.info(f"Generating diff: obs1={obs1[:30]}, obs2={obs2[:30]}")
-            raw_response, _ = self.lm_client.chat(
-                input_text=prompt,
-                system_prompt="",
-                integrations=[],
-                context_length=4096,
-            )
-
-            # Clean up response
-            diff = raw_response.strip()
-
-            # Remove markdown list markers
-            if diff.startswith("- "):
-                diff = diff[2:].strip()
-            elif diff.startswith("* "):
-                diff = diff[2:].strip()
-
-            # Remove quotes if wrapped
-            if diff.startswith("「") and diff.endswith("」"):
-                diff = diff[1:-1].strip()
-
-            # Take only first line
-            if "\n" in diff:
-                diff = diff.split("\n")[0].strip()
-
-            return diff if diff else None
-
-        except Exception as e:
-            logger.error(f"Failed to generate diff: {e}")
-            return None
 
     # ========== Feedback ==========
 
@@ -292,9 +204,6 @@ class AwarenessEngine:
         self.last_user_input = ""
         self.last_assistant_output = ""
         self.last_saves = []
-        self.prev_observation = None
-        self.last_observation = None
-        self.last_diff = None
 
     def get_stats(self) -> dict:
         """Get system statistics"""
