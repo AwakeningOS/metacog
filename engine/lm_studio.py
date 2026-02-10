@@ -141,7 +141,7 @@ class LMStudioClient:
         system_prompt: str,
         integrations: Optional[list[str]] = None,
         context_length: int = 32000,
-        temperature: float = 0.7,
+        temperature: float = 0.6,
     ) -> tuple[str, dict]:
         """
         Send a message via LM Studio MCP API.
