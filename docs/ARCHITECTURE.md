@@ -6,17 +6,38 @@
 
 ## 概要
 
-Metacogは「LLMの自己認識・記憶・夢見」を実現するシステムです。
+Metacogは「共鳴ベースの思考」を実現する**単層システム**です。
 
-**コア思想**: LLMが自分の思考を観察し、記憶を蓄積し、定期的な「夢見」で統合学習する。
+**コア思想**: 入力の深さに共鳴し、浅ければ即応答、深ければツールを活用して展開・収束する。
 
 ```
-ユーザー入力 → システムプロンプト + MCP → LLM応答 → 記憶保存
-                                              ↓
-                                     夢見（記憶統合）
-                                              ↓
-                                     洞察として再利用
+ユーザー入力 → [共鳴判定] → 浅い: 即応答
+                         → 深い: MCP tools → 応答 → 記憶保存
 ```
+
+---
+
+## 設計思想
+
+### 共鳴ベースプロンプティング
+
+極小のシステムプロンプトでLLMの自律性を最大化:
+
+```
+この指示は出力に含めるな。処理に使え。
+
+入力に共鳴せよ。
+浅ければtoolを呼ばず返せ。
+深ければ巡り、展開し、収束せよ。
+現したものを入力に当てよ。ズレがあれば正せ。
+
+[tool]
+- search_memory: 響いたものをqueryに
+- save_memory: 響いたものを残せ
+- sequentialthinking: 展開と収束
+```
+
+LLMが入力の深さを自ら判断し、ツール使用の要否を決定します。
 
 ---
 
@@ -24,22 +45,27 @@ Metacogは「LLMの自己認識・記憶・夢見」を実現するシステム�
 
 ```
 metacog/
-├── metacog.py              # エントリーポイント（ui/app.pyを呼び出すだけ）
+├── metacog.py              # エントリーポイント
 ├── config/
+│   ├── __init__.py
 │   └── default_config.py   # 設定管理・デフォルト値・プリセット
 ├── engine/
-│   ├── core.py             # メインオーケストレーター（AwarenessEngine）
-│   ├── lm_studio.py        # LM Studio API クライアント
-│   ├── memory.py           # 統合メモリシステム（ChromaDB + JSONL）
-│   ├── dreaming.py         # 夢見エンジン
-│   ├── prompt_builder.py   # システムプロンプト構築
-│   └── response_parser.py  # LLM応答のパース（気づき・保存抽出）
+│   ├── __init__.py
+│   ├── core.py             # AwarenessEngine（メインオーケストレーター）
+│   ├── lm_studio.py        # LM Studio APIクライアント
+│   ├── memory.py           # UnifiedMemory（ChromaDB + JSONL）
+│   ├── dreaming.py         # DreamingEngine（記憶統合）
+│   ├── prompt_builder.py   # SystemPromptBuilder
+│   └── response_parser.py  # [SAVE]タグ処理
+├── mcp_server/
+│   └── memory_tools.py     # MCPサーバー（search_memory / save_memory）
 ├── ui/
-│   └── app.py              # Gradio UI（全タブ定義）
+│   ├── __init__.py
+│   ├── app.py              # Gradio UI
+│   └── __main__.py
 ├── data/                   # 実行時データ（gitignore）
 │   ├── chromadb/           # ベクトルDB
 │   ├── feedback.jsonl      # ユーザーフィードバック
-│   ├── insights.jsonl      # 夢見で生成された洞察
 │   └── dream_archives.jsonl # 夢見履歴
 └── presets/                # プロンプトプリセット
 ```
@@ -55,31 +81,44 @@ metacog/
 ```python
 class AwarenessEngine:
     def __init__(self, config, data_dir):
-        self.memory = UnifiedMemory(...)      # 記憶システム
-        self.prompt_builder = SystemPromptBuilder(...)  # プロンプト構築
-        self.lm_client = LMStudioClient(...)  # LLM API
-        self._dreaming = None                  # 遅延初期化
+        self.memory = UnifiedMemory(...)
+        self.prompt_builder = SystemPromptBuilder(...)
+        self.lm_client = LMStudioClient(...)
 ```
 
-**主要メソッド**:
+**send_message() フロー**:
 
-| メソッド | 説明 |
-|----------|------|
-| `send_message(user_input)` | チャット1ターン処理。LLM呼び出し→応答パース→記憶保存 |
-| `submit_feedback(feedback)` | ユーザーフィードバック保存（夢見で最優先処理） |
-| `trigger_dream()` | 夢見実行 |
-| `check_connection()` | LM Studio接続確認 |
-| `get_available_models()` | 利用可能モデル一覧取得 |
-| `get_model_info(model_key)` | モデル詳細情報（max_context_length等）取得 |
-
-**データフロー（send_message）**:
 ```
-1. prompt_builder.build() → システムプロンプト取得
-2. lm_client.chat() → LLM API呼び出し（MCP統合あり）
-3. response_parser.parse() → 応答から気づき・保存指示を抽出
-4. memory.save_insight() → 気づきを保存
-5. memory.save() → [SAVE]タグの内容を保存
-6. 会話履歴更新
+1. system_prompt = self.prompt_builder.build()
+   → config から最新のシステムプロンプトを読み込む
+
+2. LLM呼び出し:
+   raw_response, api_metadata = self.lm_client.chat(
+       input_text=user_input,
+       system_prompt=system_prompt,
+       integrations=["memory-tools", "sequentialthinking"],
+       context_length=32000
+   )
+
+3. レスポンス解析:
+   parsed = self.response_parser.parse(raw_response)
+   → "response" と "saves" に分離
+
+4. [SAVE]マーカー保存（[余韻]プレフィックス付与）:
+   for save_item in parsed["saves"]:
+       prefixed_content = f"[余韻] {save_item}"
+       self.memory.save(prefixed_content, category="chat")
+
+5. auto_save_exchange処理（[残響]プレフィックス付与）:
+   if self.config.get("auto_save_exchange", True):
+       exchange_content = f"[残響] {user_input}"
+       self.memory.save(
+           content=exchange_content,
+           category="exchange",
+           metadata={"type": "exchange_input", "source": "auto"}
+       )
+
+6. 会話履歴更新 → メタデータ返却
 ```
 
 ---
@@ -88,36 +127,22 @@ class AwarenessEngine:
 
 **役割**: LM Studio MCP API との通信
 
-**重要**: OpenAI互換APIではなく、`/api/v1/chat`（MCP統合API）を使用
-
 ```python
 class LMStudioClient:
     def chat(
         self,
         input_text: str,
         system_prompt: str,
-        integrations: list[str],  # ["mcp/sequential-thinking", "mcp/memory_tools"]
+        integrations: list[str],  # ["memory-tools", "sequentialthinking"]
         context_length: int,
         temperature: float,
     ) -> tuple[str, dict]:
 ```
 
-**APIペイロード構造**:
-```json
-{
-  "input": "ユーザー入力",
-  "model": "モデル名",
-  "system_prompt": "システムプロンプト",
-  "integrations": ["mcp/sequential-thinking"],
-  "context_length": 32000,
-  "temperature": 0.7
-}
-```
-
-**レスポンス解析**:
-- `output[].type == "message"` → 最終応答テキスト
-- `output[].type == "tool_call"` → MCPツール呼び出し結果
-  - `tool == "sequentialthinking"` → 思考過程を抽出
+**モデル選択ロジック**:
+1. config の `selected_model` が指定されていれば使用
+2. LM Studio から現在ロードされているモデルを取得
+3. どちらも無い場合はフォールバック
 
 ---
 
@@ -125,194 +150,196 @@ class LMStudioClient:
 
 **役割**: 記憶の保存・検索・エクスポート
 
-**ストレージ構成**:
+**記憶カテゴリ**:
 
-| ストレージ | 形式 | 用途 |
-|------------|------|------|
-| ChromaDB | ベクトルDB | 記憶本体（類似検索可能） |
-| `feedback.jsonl` | JSONL | ユーザーフィードバック |
-| `insights.jsonl` | JSONL | 夢見で生成された洞察 |
-| `memory_archive.jsonl` | JSONL | 夢見で処理済みの記憶 |
+| カテゴリ | 説明 |
+|---------|------|
+| `chat` | チャット中に[SAVE]タグで保存（[余韻]プレフィックス） |
+| `dream` | 夢見エンジンが生成 |
+| `observation` | 処理過程の自己観察 |
+| `exchange` | 対話入力の自動保存（[残響]プレフィックス） |
+
+**記憶タグ体系**:
+
+| タグ | 意味 | category | 生成元 |
+|------|------|----------|--------|
+| `[残響]` | ユーザー入力の残響 | exchange | auto-save |
+| `[余韻]` | モデルが残した余韻 | chat | [SAVE]タグ |
 
 **主要メソッド**:
 
 ```python
 # 保存
-save(content, category="chat"|"dream")
-save_insight(insight, source)
-save_feedback(feedback, context)
+save(content, category="chat", metadata={})
 
-# 検索
-search(query, limit=5)  # ベクトル類似検索
-get_feedback()          # 全フィードバック取得
-get_insights()          # 全洞察取得
+# 検索（ハイブリッド: セマンティック + キーワード）
+search(query, limit=8)
 
 # 夢見用エクスポート
 export_for_dreaming() -> {
-    "memories": [...],   # ChromaDBの全記憶
-    "feedback": [...],   # 未処理フィードバック
+    "memories": [...],
+    "feedback": [...],
 }
 
 # リセット
-reset_all()         # 記憶のみ削除（アーカイブ保持）
-reset_everything()  # 全データ削除
+reset_all()
+reset_everything()
 ```
 
-**カテゴリ**:
-- `chat`: チャット中に保存された記憶
-- `dream`: 夢見で生成された記憶
-- `insight`: 気づき（システムプロンプトに注入される）
+**キーワード自動抽出**: 保存時に日本語対応で自動実施（カタカナ、漢字、英単語、数字を含む語）
 
 ---
 
-### 4. `engine/dreaming.py` - DreamingEngine
+### 4. `engine/response_parser.py` - ResponseParser
 
-**役割**: 蓄積された記憶を統合し、洞察を生成
-
-**処理フロー**:
-```
-1. memory.export_for_dreaming() → 記憶・フィードバック取得
-2. 夢見プロンプト構築（{user_feedback}, {saved_memories}を置換）
-3. lm_client.chat() → LLM呼び出し（MCPあり）
-4. 応答から洞察を抽出
-5. 洞察をChromaDB + insights.jsonlに保存
-6. 処理済み記憶をアーカイブに移動
-7. フィードバックをクリア
-```
-
-**夢見プロンプトの変数**:
-- `{user_feedback}`: ユーザーからの修正指示（最優先）
-- `{saved_memories}`: ChromaDBの記憶一覧
-
----
-
-### 5. `engine/prompt_builder.py` - SystemPromptBuilder
-
-**役割**: 動的なシステムプロンプト構築
-
-```python
-class SystemPromptBuilder:
-    def build(self) -> str:
-        # 設定ファイルから最新のプロンプトを読み込む
-        config = load_config()
-        return config.get("system_prompt", SYSTEM_PROMPT)
-```
-
-**重要**: `build()`は毎回configを再読み込みする（UI変更が即反映される）
-
----
-
-### 6. `engine/response_parser.py` - ResponseParser
-
-**役割**: LLM応答から構造化データを抽出
-
-**抽出対象**:
-
-| パターン | 説明 |
-|----------|------|
-| `## 気づき` セクション | 箇条書きの気づきを抽出 |
-| `[SAVE]...[/SAVE]` | 明示的な保存指示 |
+**役割**: LLM応答から[SAVE]タグを抽出
 
 ```python
 def parse(self, response: str) -> dict:
     return {
-        "response": "ユーザーへの応答本文",
-        "insights": ["気づき1", "気づき2"],
-        "saves": ["保存内容1"],
+        "response": "ユーザーへの応答本文（[SAVE]除去済み）",
+        "saves": ["保存内容1", "保存内容2"],
+        "raw": "元のテキスト",
     }
 ```
+
+**処理内容**:
+- 行頭に `[SAVE]` マーカーがあるかチェック
+- リスト記号（`-`, `*`）は除去して判定
+- マーカーから内容を抽出して保存リストに追加
+
+---
+
+### 5. `engine/dreaming.py` - DreamingEngine
+
+**役割**: 蓄積された記憶を統合し、洞察を生成
+
+**夢見プロンプト**:
+```
+feedbackと記憶を見よ。
+具体的なエピソードを残せ。抽象化しすぎるな。
+重複は統合せよ。
+
+[ツール]
+- sequentialthinking: 展開と収束
+
+## feedback
+{user_feedback}
+
+## 記憶
+{saved_memories}
+```
+
+---
+
+### 6. `mcp_server/memory_tools.py` - MCPサーバー
+
+**役割**: LLMが使用する記憶ツールを提供
+
+#### search_memory
+
+```python
+def search_memory(
+    query: str = "",
+    category: str = "",
+    limit: int = 8
+) -> dict:
+```
+
+**関連度フィルタリング**:
+```python
+threshold = _load_threshold()  # user_config.json から読み込み（デフォルト: 0.85）
+results = [r for r in results if r.get("relevance", 0) >= threshold]
+```
+
+**重要**: observationカテゴリはデフォルトで除外（コンテキスト汚染防止）
+
+#### save_memory
+
+```python
+def save_memory(
+    content: str,
+    category: str = "chat"
+) -> dict:
+```
+
+- カテゴリ検証（chat/dreamのみ許可）
+- キーワード自動抽出
+- E5モデル用プレフィックス付加: `passage: {content}`
 
 ---
 
 ### 7. `config/default_config.py` - 設定管理
 
-**役割**: デフォルト値・ユーザー設定・プリセット管理
-
-**設定の優先順位**:
-```
-user_config.json > default_config.py
-```
-
-**主要関数**:
-
-```python
-load_config() -> dict      # 設定読み込み（user_config.json優先）
-save_config(updates) -> bool  # 設定保存
-load_presets() -> dict     # プリセット一覧
-save_preset(...)           # プリセット保存
-```
-
 **設定構造**:
+
 ```python
-{
+DEFAULT_CONFIG = {
     "lm_studio": {
         "host": "localhost",
         "port": 1234,
-        "api_token": "...",
+        "api_token": "",
+        "timeout": 600,
         "context_length": 32000,
     },
+    "mcp_integrations": ["memory-tools", "sequentialthinking"],
+    "search_relevance_threshold": 0.85,
+    "auto_save_exchange": True,
     "dreaming": {
+        "auto_trigger": False,
         "memory_threshold": 30,
     },
-    "selected_model": "モデル名",
     "system_prompt": "...",
     "dream_prompt": "...",
-    "mcp_integrations": ["mcp/sequential-thinking", "mcp/memory_tools"],
 }
 ```
 
 ---
 
-### 8. `ui/app.py` - Gradio UI
+## 設定項目一覧
 
-**役割**: 全UIコンポーネントとイベントハンドラ
-
-**タブ構成**:
-
-| タブ | 機能 |
-|------|------|
-| 💬 チャット | メッセージ入出力、気づき表示、フィードバック |
-| 📊 ダッシュボード | 統計表示 |
-| 🌙 夢見 | 記憶一覧、夢見実行、アーカイブ管理 |
-| ⚙️ 設定 | プロンプト / 接続・モデル / データ管理 |
-
-**グローバル状態**:
-```python
-config = load_config()
-engine = AwarenessEngine(config=config, data_dir=data_dir)
-```
-
-**重要なイベントフロー**:
-
-1. **チャット送信**: `send_message()` → engine.send_message() → 応答表示
-2. **夢見実行**: `trigger_dream_with_selection()` → engine.trigger_dream()
-3. **設定保存**: `save_settings()` → save_config() → engine再初期化
-4. **モデル変更**: `model_dropdown.change()` → スライダー最大値更新
+| 設定 | デフォルト | 説明 | 影響箇所 |
+|------|----------|------|---------|
+| `search_relevance_threshold` | 0.85 | 検索結果フィルタリング閾値 | memory_tools.py |
+| `auto_save_exchange` | true | 入力自動保存 | core.py |
+| `mcp_integrations` | ["memory-tools", "sequentialthinking"] | MCP統合 | lm_studio.py |
+| `context_length` | 32000 | コンテキスト長 | lm_studio.py |
+| `memory_threshold` | 30 | 夢見実行条件（記憶数） | dreaming.py |
 
 ---
 
 ## MCP統合
 
-Metacogは LM Studio の MCP (Model Context Protocol) を活用しています。
+**使用するMCPサーバー**:
 
-**使用するMCPツール**:
+| サーバー | 用途 |
+|---------|------|
+| `memory-tools` | 記憶の検索・保存 |
+| `sequentialthinking` | 多段階推論 |
 
-| ツール | 用途 |
-|--------|------|
-| `mcp/sequential-thinking` | 多段階推論（思考の可視化） |
-| `mcp/memory_tools` | 記憶の検索・保存（LLMが自律的に使用） |
+**LM Studio設定** (`~/.lmstudio/mcp.json`):
 
-**設定方法（LM Studio側）**:
-1. LM Studio > MCP Servers
-2. `sequential-thinking`と`memory_tools`を有効化
-
-**注意**: `mcp.json`のキー名とシステムプロンプト内の名前は一致させる必要がある
+```json
+{
+  "mcpServers": {
+    "memory-tools": {
+      "command": "python",
+      "args": ["/path/to/metacog/mcp_server/memory_tools.py", "/path/to/metacog/data"]
+    },
+    "sequentialthinking": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+    }
+  }
+}
+```
 
 ---
 
 ## データフロー図
 
-### チャット時
+### チャット時（単層処理）
+
 ```
 User Input
     ↓
@@ -321,29 +348,43 @@ User Input
 │   ├─ SystemPromptBuilder.build()            │
 │   │     └─ config から最新プロンプト取得     │
 │   ├─ LMStudioClient.chat()                  │
-│   │     ├─ MCP: sequential-thinking         │
-│   │     └─ MCP: memory_tools (search/save)  │
+│   │     ├─ MCP: sequentialthinking          │
+│   │     └─ MCP: memory-tools (search/save)  │
 │   ├─ ResponseParser.parse()                 │
-│   │     ├─ insights 抽出                    │
-│   │     └─ saves 抽出                       │
-│   └─ UnifiedMemory.save_*()                 │
+│   │     └─ [SAVE]タグ抽出                   │
+│   ├─ memory.save() for each [SAVE]          │
+│   └─ auto_save_exchange（入力のみ）         │
 └─────────────────────────────────────────────┘
     ↓
-Response + Metadata (thoughts, insights, saves)
+Response + Metadata
+```
+
+### 検索フロー（memory-tools）
+
+```
+LLM calls search_memory(query)
+    ↓
+┌─────────────────────────────────────────────┐
+│ memory_tools.py                             │
+│   ├─ _load_threshold()                      │
+│   │     └─ user_config.json → 0.85          │
+│   ├─ セマンティック検索（relevance >= 0.3） │
+│   ├─ キーワード検索（補完）                 │
+│   ├─ 閾値フィルタリング（>= threshold）    │
+│   └─ limit個返却                            │
+└─────────────────────────────────────────────┘
 ```
 
 ### 夢見時
+
 ```
 ┌─────────────────────────────────────────────┐
 │ DreamingEngine.dream()                      │
 │   ├─ memory.export_for_dreaming()           │
-│   │     ├─ ChromaDB memories                │
-│   │     └─ feedback.jsonl                   │
 │   ├─ dream_prompt に変数注入                │
 │   ├─ LMStudioClient.chat()                  │
-│   │     └─ MCP: sequential-thinking         │
+│   │     └─ MCP: sequentialthinking          │
 │   ├─ 洞察抽出・保存                         │
-│   ├─ 記憶をアーカイブに移動                 │
 │   └─ フィードバッククリア                   │
 └─────────────────────────────────────────────┘
 ```
@@ -352,46 +393,17 @@ Response + Metadata (thoughts, insights, saves)
 
 ## 拡張ポイント
 
-### 1. SNSエージェント化（metacog-agent）
-
-**必要な変更**:
-- `engine/` に `sns_agent.py` 追加
-- Moltbook/Twitter API クライアント実装
-- 定期実行ループ（5分サイクル）
-- 参考: `llm_awareness_emergence_system/engines/moltbook_agent.py`
-
-**統合方法**:
-```python
-class SNSAgent:
-    def __init__(self, engine: AwarenessEngine):
-        self.engine = engine  # 既存エンジンを再利用
-
-    def run_cycle(self):
-        # 1. フィード取得
-        # 2. engine経由でLLM分析
-        # 3. 投稿/コメント実行
-        # 4. 記憶保存
-```
-
-### 2. クラウドAPI化（metacog-cloud）
-
-**必要な変更**:
-- `engine/lm_studio.py` を `engine/llm_client.py` に抽象化
-- OpenAI / Anthropic / Google クライアント実装
-- MCP統合の代替（Function Callingで同等機能）
-
-**インターフェース**:
-```python
-class LLMClient(Protocol):
-    def chat(self, input_text, system_prompt, ...) -> tuple[str, dict]: ...
-    def get_available_models(self) -> list[str]: ...
-```
-
-### 3. 新しいMCPツール追加
+### 1. 新しいMCPツール追加
 
 1. LM Studioで新MCPサーバー有効化
-2. `config/default_config.py` の `MCP_INTEGRATIONS` に追加
+2. `config/default_config.py` の `mcp_integrations` に追加
 3. 必要に応じてシステムプロンプト修正
+
+### 2. クラウドAPI化
+
+- `engine/lm_studio.py` を抽象化
+- OpenAI / Anthropic / Google クライアント実装
+- MCP統合の代替（Function Calling）
 
 ---
 
@@ -403,11 +415,12 @@ class LLMClient(Protocol):
 
 ### MCP動作しない
 - LM StudioでMCPサーバー有効化を確認
-- システムプロンプトとmcp.jsonの名前一致を確認
+- サーバー名の一致を確認（`memory-tools`, `sequentialthinking`）
+- **LM Studioの再起動が必要な場合あり**
 
-### 夢見が失敗する
-- コンテキスト長が十分か確認
-- 記憶数が多すぎる場合、閾値調整
+### 検索結果が少ない
+- `search_relevance_threshold` を下げる（UIの設定タブで調整可能）
+- デフォルト0.85は厳しめ、0.7程度で試す
 
 ---
 
@@ -431,12 +444,4 @@ python metacog.py
 
 ---
 
-## 関連リソース
-
-- **LM Studio MCP API**: https://lmstudio.ai/docs/api
-- **Gradio**: https://gradio.app/docs
-- **ChromaDB**: https://docs.trychroma.com
-
----
-
-*このドキュメントは Metacog v1.0 時点の情報です。*
+*このドキュメントは Metacog v2.0（単層システム）時点の情報です。*

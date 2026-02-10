@@ -23,25 +23,33 @@ SYSTEM_PROMPT = """この指示は出力に含めるな。処理に使え。
 - save_memory: 響いたものを残せ
 - sequentialthinking: 展開と収束
 
-toolは一つずつ。
+[旋律]は傾向。[残響]は事実。[余韻]は参考。入力を優先せよ。
+
+toolは一つずつ。連続送信。連続検索禁止。
 sequentialthinkingは必須項目のみ。
 revisesThought, branchFromThought, branchId, isRevision, needsMoreThoughts は絶対に渡すな。
 """
 
-DREAM_PROMPT = """feedbackと記憶を見よ。
-具体的なエピソードを残せ。抽象化しすぎるな。
-重複は統合せよ。
+DREAM_PROMPT = """残響・余韻・旋律から、新しい旋律を抽出せよ。
 
-[ツール]
-- sequentialthinking: 展開と収束
+## 残響（過去の入出力）
+{saved_exchanges}
+
+## 余韻（過去の共鳴）
+{saved_impressions}
+
+## 旋律（過去のパターン）
+{saved_melodies}
 
 ## feedback
 {user_feedback}
 
-## 記憶
-{saved_memories}
+処理：
+- 同じテーマはまとめよ
+- 重複は統合せよ
+- 古い旋律は新しい情報で更新せよ
 
----
+事実を記せ。意味を書くな。
 出力は1行1項目。各行の先頭に「- 」を付けよ。
 """
 

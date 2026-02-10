@@ -98,6 +98,7 @@ class AwarenessEngine:
         parsed = self.response_parser.parse(raw_response)
 
         # 5. Save chat memories ([SAVE] markers)
+        # Note: [余韻] prefix is added by memory_tools.py (MCP side)
         for save_item in parsed["saves"]:
             try:
                 self.memory.save(save_item, category="chat")
@@ -107,7 +108,7 @@ class AwarenessEngine:
         # 6. Auto-save input only (not output to avoid LLM copying past responses)
         if self.config.get("auto_save_exchange", True):
             try:
-                exchange_content = f"[対話] {user_input}"
+                exchange_content = f"[残響] {user_input}"
                 self.memory.save(
                     content=exchange_content,
                     category="exchange",

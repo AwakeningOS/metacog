@@ -375,8 +375,8 @@ def save_memory(
         category = "chat"
 
     try:
-        # 自然な文章のまま保存（カテゴリプレフィックスは付けない）
-        formatted_content = content.strip()
+        # [余韻]プレフィックスを付与（モデルの自発的save）
+        formatted_content = f"[余韻] {content.strip()}"
 
         # キーワード自動抽出
         keywords = extract_keywords(content)

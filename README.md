@@ -1,8 +1,8 @@
 # Metacog - LLM Self-Awareness Engine
 
-ローカルLLMに「自己観察的な思考プロセス」を実装するシステム。
+ローカルLLMに「共鳴ベースの思考プロセス」を実装するシステム。
 
-LLMが単なる応答生成ではなく、**自分の思考を観察しながら応答する**ことで、より深い対話と継続的な自己改善を実現します。
+LLMが入力の深さに**共鳴**し、浅ければ即座に応答、深ければツールを活用して展開・収束することで、自然な対話を実現します。
 
 ---
 
@@ -18,11 +18,12 @@ LLMが単なる応答生成ではなく、**自分の思考を観察しながら
 
 ## Features
 
-- **Self-Reflective Thinking**: Sequential Thinking MCPを活用した自己再帰的思考
-- **Persistent Memory**: ChromaDBによるセマンティック検索可能な長期記憶
-- **Insight Extraction**: 対話から自動的に気づきを抽出・保存
+- **共鳴ベース処理**: 入力の深さに応じた動的な応答（浅い→即応答、深い→ツール活用）
+- **単層システム**: シンプルで軽量な処理フロー
+- **Persistent Memory**: ChromaDBによるセマンティック検索 + 関連度フィルタリング（閾値0.85）
+- **自動入力保存**: 対話入力を自動でexchangeカテゴリに保存
 - **Dreaming Engine**: 蓄積された記憶とフィードバックから新たな洞察を生成
-- **MCP Integration**: Model Context Protocolによるツール連携
+- **MCP Integration**: memory-tools / sequentialthinking によるツール連携
 
 ## Architecture
 
@@ -34,17 +35,21 @@ LLMが単なる応答生成ではなく、**自分の思考を観察しながら
                           │
 ┌─────────────────────────▼───────────────────────────────┐
 │                   AwarenessEngine                       │
-│  ┌─────────────┐  ┌──────────────┐  ┌───────────────┐  │
-│  │PromptBuilder│  │ResponseParser│  │DreamingEngine │  │
-│  └─────────────┘  └──────────────┘  └───────────────┘  │
+│                                                         │
+│  入力 → [共鳴判定] → 浅い: 即応答                       │
+│                    → 深い: MCP tools → 応答             │
+│                                                         │
+│  [SAVE]タグ → memory保存 (category: chat)               │
+│  入力 → exchange自動保存                                │
 └─────────────────────────┬───────────────────────────────┘
                           │
         ┌─────────────────┼─────────────────┐
-        │                 │                 │
         ▼                 ▼                 ▼
 ┌───────────────┐ ┌───────────────┐ ┌───────────────┐
 │ UnifiedMemory │ │LMStudioClient │ │  MCP Server   │
-│  (ChromaDB)   │ │   (API)       │ │(memory_tools) │
+│  (ChromaDB)   │ │   (API)       │ │(memory-tools) │
+│               │ │               │ │(sequential    │
+│ 閾値: 0.85    │ │               │ │ thinking)     │
 └───────────────┘ └───────────────┘ └───────────────┘
 ```
 
@@ -150,20 +155,22 @@ LM Studioの `~/.lmstudio/mcp.json` に以下を追加:
 ```json
 {
   "mcpServers": {
-    "memory": {
+    "memory-tools": {
       "command": "python",
       "args": [
         "/path/to/metacog/mcp_server/memory_tools.py",
         "/path/to/metacog/data"
       ]
     },
-    "sequential-thinking": {
+    "sequentialthinking": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
     }
   }
 }
 ```
+
+**注意**: MCPサーバー名は `memory-tools` と `sequentialthinking` です。
 
 ## Usage
 
@@ -186,29 +193,52 @@ start.bat
 
 ### Tabs
 
-- **Chat**: LLMとの対話。応答後に「気づき」が自動抽出される
+- **Chat**: LLMとの対話。[SAVE]タグで記憶保存、入力は自動保存
 - **Dashboard**: 記憶統計、Dreaming実行、フィードバック送信
-- **Settings**: 接続設定、記憶リセット
+- **Settings**: 接続設定、記憶閾値、記憶リセット
 
 ## How It Works
 
-### 1. Telos-Based Prompting
+### 1. 共鳴ベースプロンプティング
 
-システムプロンプトでLLMに「自分の存在目的（テロス）」を与え、自律的な思考を促す設計。具体的な行動指示ではなく、存在の方向性を定義することで、LLMが自ら考え応答する。
+極小のシステムプロンプトでLLMの自律性を最大化:
+
+```
+入力に共鳴せよ。
+浅ければtoolを呼ばず返せ。
+深ければ巡り、展開し、収束せよ。
+```
+
+入力の深さに応じてLLMが自らツール使用を判断します。
 
 ### 2. Memory Tools (MCP)
 
 LLMが自律的に記憶を検索・保存:
-- `search_memory`: 過去の対話やインサイトを検索
-- `save_memory`: 重要な気づきを長期記憶に保存
+- `search_memory`: 過去の対話や記憶を検索（関連度0.85以上のみ返却）
+- `save_memory`: 重要な内容を長期記憶に保存
 
-### 3. Insight Extraction
+### 3. [SAVE]タグによる記憶保存
 
-応答から `## 気づき` セクションを自動抽出し、ChromaDBに保存。
+LLMが応答中に `[SAVE]重要な情報` と記述すると、その内容がChromaDBに保存されます。
 
-### 4. Dreaming Engine
+### 4. 記憶カテゴリ
 
-蓄積された記憶とフィードバックを元に、LLMが「差異の中の共通」を見つけ出し、新たな洞察を生成。カテゴリ分けせず自由形式で出力し、ベクトル検索に最適化。
+| カテゴリ | 説明 |
+|---------|------|
+| `chat` | チャット中に[SAVE]タグで保存 |
+| `dream` | 夢見エンジンが生成 |
+| `observation` | 処理過程の自己観察 |
+| `exchange` | 対話入力の自動保存 |
+
+### 5. 関連度フィルタリング
+
+検索結果は `search_relevance_threshold`（デフォルト0.85）以上のもののみ返されます。
+低関連度の記憶を除外し、コンテキストの品質を向上。
+
+### 6. Dreaming Engine
+
+蓄積された記憶とフィードバックを元に、LLMが新たな洞察を生成。
+具体的なエピソードを残し、過度な抽象化を避ける設計。
 
 ## Project Structure
 

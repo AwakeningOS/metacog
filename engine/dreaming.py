@@ -81,16 +81,28 @@ class DreamingEngine:
         else:
             feedback_text = "(ユーザーからの修正指示なし)"
 
-        # Step 3: Format saved memories
-        if memories:
-            memory_lines = []
-            for mem in memories:
-                content = mem.get("content", "")
-                category = mem.get("category", "")
-                memory_lines.append(f"- [{category}] {content}")
-            memories_text = "\n".join(memory_lines)
-        else:
-            memories_text = "(保存された記憶なし)"
+        # Step 3: Format saved memories by category
+        exchanges = []  # 残響 (exchange category)
+        impressions = []  # 余韻 (chat category)
+        melodies = []  # 旋律 (dream category)
+        other_memories = []  # その他
+
+        for mem in memories:
+            content = mem.get("content", "")
+            category = mem.get("category", "")
+            if category == "exchange":
+                exchanges.append(f"- {content}")
+            elif category == "chat":
+                impressions.append(f"- {content}")
+            elif category == "dream":
+                melodies.append(f"- {content}")
+            else:
+                other_memories.append(f"- [{category}] {content}")
+
+        exchanges_text = "\n".join(exchanges) if exchanges else "(なし)"
+        impressions_text = "\n".join(impressions) if impressions else "(なし)"
+        melodies_text = "\n".join(melodies) if melodies else "(なし)"
+        memories_text = "\n".join(exchanges + impressions + melodies + other_memories) if memories else "(保存された記憶なし)"
 
         # Step 4: Build and send dream prompt (load from config)
         config = load_config()
@@ -98,6 +110,9 @@ class DreamingEngine:
         dream_system_prompt = dream_prompt_template.format(
             user_feedback=feedback_text,
             saved_memories=memories_text,
+            saved_exchanges=exchanges_text,
+            saved_impressions=impressions_text,
+            saved_melodies=melodies_text,
         )
 
         logger.info(f"Dream prompt: {len(dream_system_prompt)} chars | "
@@ -136,10 +151,12 @@ class DreamingEngine:
         self.memory.archive_insights(new_insight_entries)
 
         # Save dream insights to ChromaDB (category="dream" for all dream-generated memories)
+        # [旋律] プレフィックスを付与（夢見で生成されたパターン）
         for content in parsed_insights:
             try:
+                formatted_content = f"[旋律] {content.strip()}"
                 self.memory.save(
-                    content=content,
+                    content=formatted_content,
                     category="dream",  # 夢見由来の記憶
                     metadata={"source": "dreaming"}
                 )
