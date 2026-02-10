@@ -17,6 +17,7 @@ from .memory import UnifiedMemory
 from .prompt_builder import SystemPromptBuilder
 from .response_parser import ResponseParser
 from .lm_studio import LMStudioClient
+from .utils import strip_tags
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,8 @@ class AwarenessEngine:
         # 6. Auto-save input only (not output to avoid LLM copying past responses)
         if self.config.get("auto_save_exchange", True):
             try:
-                exchange_content = f"[残響] {user_input}"
+                clean_input = strip_tags(user_input)
+                exchange_content = f"[残響] {clean_input}"
                 self.memory.save(
                     content=exchange_content,
                     category="exchange",

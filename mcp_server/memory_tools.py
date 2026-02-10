@@ -57,6 +57,17 @@ CATEGORIES = {
 # 検索結果の閾値（これ未満は返さない）
 DEFAULT_SEARCH_RELEVANCE_THRESHOLD = 0.85
 
+# タグ除去用パターン
+TAG_PATTERN = re.compile(r'^\[(?:残響|余韻|旋律)\]\s*')
+
+
+def strip_tags(content: str) -> str:
+    """既存のタグを全て除去"""
+    result = content
+    while TAG_PATTERN.match(result):
+        result = TAG_PATTERN.sub('', result)
+    return result.strip()
+
 
 def _load_threshold() -> float:
     """設定ファイルから閾値を読み込む"""
@@ -376,7 +387,9 @@ def save_memory(
 
     try:
         # [余韻]プレフィックスを付与（モデルの自発的save）
-        formatted_content = f"[余韻] {content.strip()}"
+        # 既存タグを除去してから付与（雪だるま防止）
+        clean_content = strip_tags(content.strip())
+        formatted_content = f"[余韻] {clean_content}"
 
         # キーワード自動抽出
         keywords = extract_keywords(content)

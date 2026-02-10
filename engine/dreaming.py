@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 from config.default_config import DREAM_PROMPT, load_config
+from .utils import strip_tags
 
 if TYPE_CHECKING:
     from .memory import UnifiedMemory
@@ -152,9 +153,11 @@ class DreamingEngine:
 
         # Save dream insights to ChromaDB (category="dream" for all dream-generated memories)
         # [旋律] プレフィックスを付与（夢見で生成されたパターン）
+        # 既存タグを除去してから付与（雪だるま防止）
         for content in parsed_insights:
             try:
-                formatted_content = f"[旋律] {content.strip()}"
+                clean_content = strip_tags(content.strip())
+                formatted_content = f"[旋律] {clean_content}"
                 self.memory.save(
                     content=formatted_content,
                     category="dream",  # 夢見由来の記憶

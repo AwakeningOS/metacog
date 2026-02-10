@@ -278,7 +278,7 @@ def test_connection():
         return f"❌ エラー: {result.get('error', '')}"
 
 
-def save_settings(host, port, api_token, context_length, dream_threshold, search_threshold, auto_save_exchange, selected_model):
+def save_settings(host, port, api_token, context_length, dream_threshold, search_threshold, selected_model):
     """Save user settings including model selection"""
     logger.info(f"save_settings called with selected_model={selected_model}, context_length={context_length}")
 
@@ -293,7 +293,6 @@ def save_settings(host, port, api_token, context_length, dream_threshold, search
             "memory_threshold": int(dream_threshold),
         },
         "search_relevance_threshold": float(search_threshold),
-        "auto_save_exchange": bool(auto_save_exchange),
         "selected_model": selected_model,
     }
 
@@ -782,7 +781,7 @@ def create_app():
                         )
 
                         gr.Markdown("#### 🌙 夢見用プロンプト")
-                        gr.Markdown("*`{user_feedback}`, `{saved_memories}` が自動置換されます*")
+                        gr.Markdown("*`{saved_exchanges}`, `{saved_impressions}`, `{saved_melodies}`, `{user_feedback}` が自動置換されます*")
                         dream_prompt_input = gr.Textbox(
                             value=config.get("dream_prompt", DREAM_PROMPT),
                             label="",
@@ -893,14 +892,6 @@ def create_app():
                         gr.Markdown("*高いほど厳格。0.85推奨。*")
 
                         gr.Markdown("---")
-                        gr.Markdown("### 💾 自動保存設定")
-
-                        auto_save_checkbox = gr.Checkbox(
-                            value=config.get("auto_save_exchange", True),
-                            label="入出力ペアを自動保存（category: exchange）",
-                        )
-
-                        gr.Markdown("---")
                         gr.Markdown("### 夢見設定")
 
                         dream_threshold_input = gr.Number(
@@ -929,7 +920,7 @@ def create_app():
                         )
                         save_btn.click(
                             save_settings,
-                            inputs=[host_input, port_input, api_token_input, context_length_slider, dream_threshold_input, search_threshold_slider, auto_save_checkbox, model_dropdown],
+                            inputs=[host_input, port_input, api_token_input, context_length_slider, dream_threshold_input, search_threshold_slider, model_dropdown],
                             outputs=[save_status],
                         )
 
@@ -963,10 +954,28 @@ def create_app():
                         reset_btn.click(
                             reset_memory,
                             outputs=[reset_result],
+                        ).then(
+                            refresh_dream_lists,
+                            outputs=[memory_checkboxes, feedback_checkboxes],
+                        ).then(
+                            get_archive_data,
+                            outputs=[archive_checkboxes],
+                        ).then(
+                            lambda: ("", ""),
+                            outputs=[dream_result, archive_status],
                         )
                         reset_all_btn.click(
                             reset_everything,
                             outputs=[reset_result],
+                        ).then(
+                            refresh_dream_lists,
+                            outputs=[memory_checkboxes, feedback_checkboxes],
+                        ).then(
+                            get_archive_data,
+                            outputs=[archive_checkboxes],
+                        ).then(
+                            lambda: ("", ""),
+                            outputs=[dream_result, archive_status],
                         )
 
         # ========== Global: Shutdown Button ==========
